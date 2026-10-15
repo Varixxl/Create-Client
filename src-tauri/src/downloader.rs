@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
+use crate::launcher::{is_rule_allowed, maven_to_path, VersionMeta};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressPayload {
@@ -64,7 +65,12 @@ pub fn get_runtime_dir() -> PathBuf {
 pub fn get_java_executable(runtime_dir: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        runtime_dir.join("java17").join("bin").join("java.exe")
+        let javaw = runtime_dir.join("java17").join("bin").join("javaw.exe");
+        if javaw.exists() {
+            javaw
+        } else {
+            runtime_dir.join("java17").join("bin").join("java.exe")
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -661,4 +667,137 @@ pub async fn ensure_assets(game_dir: &Path) -> Result<PathBuf, String> {
     }
 
     Ok(assets_dir)
+}
+
+pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), String> {
+    let version_file = game_dir.join("version.json");
+    if !version_file.exists() {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(&version_file).map_err(|e| e.to_string())?;
+    let version_meta: VersionMeta = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Ok(()),
+    };
+
+    let lib_dir = game_dir.join("libraries");
+    let natives_dir = game_dir.join("natives");
+    let _ = fs::create_dir_all(&lib_dir);
+    let _ = fs::create_dir_all(&natives_dir);
+
+    let client = Client::new();
+
+    // Check which libraries are missing for the current platform
+    let mut missing_libs = Vec::new();
+    for lib in &version_meta.libraries {
+        if !is_rule_allowed(&lib.rules) {
+            continue;
+        }
+
+        let rel_path = lib
+            .downloads
+            .as_ref()
+            .and_then(|d| d.artifact.as_ref())
+            .and_then(|a| a.path.as_ref())
+            .cloned()
+            .or_else(|| lib.name.as_deref().and_then(maven_to_path));
+
+        let download_url = lib
+            .downloads
+            .as_ref()
+            .and_then(|d| d.artifact.as_ref())
+            .and_then(|a| a.url.as_ref())
+            .cloned();
+
+        if let (Some(rel), Some(url)) = (rel_path, download_url) {
+            let full_dest = lib_dir.join(&rel);
+            if !full_dest.exists() {
+                missing_libs.push((full_dest, url, rel.contains("natives")));
+            } else if rel.contains("natives") {
+                extract_natives_from_jar(&full_dest, &natives_dir);
+            }
+        }
+    }
+
+    if !missing_libs.is_empty() {
+        let total = missing_libs.len();
+        for (idx, (full_dest, url, is_native)) in missing_libs.into_iter().enumerate() {
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    task: format!("Downloading libraries ({}/{})...", idx + 1, total),
+                    current_bytes: idx as u64,
+                    total_bytes: total as u64,
+                    percentage: ((idx as f64) / (total as f64)) * 100.0,
+                    speed_bytes_sec: 0,
+                },
+            );
+
+            if let Some(parent) = full_dest.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+
+            if let Ok(res) = client.get(&url).header("User-Agent", "CreateClient-Launcher").send().await {
+                if res.status().is_success() {
+                    if let Ok(bytes) = res.bytes().await {
+                        let _ = fs::write(&full_dest, bytes);
+                        if is_native {
+                            extract_natives_from_jar(&full_dest, &natives_dir);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Ensure vanilla client jar
+    let client_jar = game_dir.join("1.20.1.jar");
+    if !client_jar.exists() {
+        let alt = game_dir.join("client.jar");
+        if !alt.exists() {
+            let _ = app.emit(
+                "download-progress",
+                ProgressPayload {
+                    task: "Downloading Minecraft 1.20.1 client jar...".to_string(),
+                    current_bytes: 0,
+                    total_bytes: 100,
+                    percentage: 50.0,
+                    speed_bytes_sec: 0,
+                },
+            );
+            let client_url = "https://piston-data.mojang.com/v1/objects/43db9b498cb67058d2e12d394e6507722e71bb45/client.jar";
+            if let Ok(res) = client.get(client_url).header("User-Agent", "CreateClient-Launcher").send().await {
+                if res.status().is_success() {
+                    if let Ok(bytes) = res.bytes().await {
+                        let _ = fs::write(&client_jar, bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_natives_from_jar(jar_path: &Path, natives_dir: &Path) {
+    if let Ok(file) = File::open(jar_path) {
+        if let Ok(mut archive) = zip::ZipArchive::new(file) {
+            for i in 0..archive.len() {
+                if let Ok(mut entry) = archive.by_index(i) {
+                    let name = entry.name().to_string();
+                    if name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib") {
+                        if let Some(file_name) = Path::new(&name).file_name() {
+                            let dest = natives_dir.join(file_name);
+                            if !dest.exists() {
+                                if let Ok(mut out) = File::create(&dest) {
+                                    let _ = std::io::copy(&mut entry, &mut out);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -87,11 +87,16 @@ async fn sync_modpack(app: AppHandle, force_repair: bool) -> Result<String, Stri
     let _ = downloader::ensure_assets(&game_dir).await;
 
     // 3. Synchronize modpack files from GitHub release manifest
-    if !cfg.release_manifest_url.trim().is_empty() {
+    let sync_result = if !cfg.release_manifest_url.trim().is_empty() {
         downloader::check_and_sync_modpack(&app, &game_dir, &cfg.release_manifest_url, force_repair).await
     } else {
         Ok("1.0.0 (Local)".to_string())
-    }
+    };
+
+    // 4. Ensure all platform-specific libraries & natives from version.json
+    let _ = downloader::ensure_libraries(&app, &game_dir).await;
+
+    sync_result
 }
 
 #[tauri::command]
@@ -105,6 +110,9 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     // Ensure Java 17
     let runtime_dir = downloader::get_runtime_dir();
     let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+
+    // Ensure all platform-specific libraries and natives are present before launching
+    let _ = downloader::ensure_libraries(&app, &game_dir).await;
 
     // Launch Forge process
     launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)

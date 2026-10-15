@@ -56,7 +56,7 @@ pub struct RuleOs {
     pub name: Option<String>,
 }
 
-fn is_rule_allowed(rules: &[LibraryRule]) -> bool {
+pub fn is_rule_allowed(rules: &[LibraryRule]) -> bool {
     if rules.is_empty() {
         return true;
     }
@@ -85,7 +85,7 @@ fn is_rule_allowed(rules: &[LibraryRule]) -> bool {
     allowed
 }
 
-fn maven_to_path(name: &str) -> Option<String> {
+pub fn maven_to_path(name: &str) -> Option<String> {
     let parts: Vec<&str> = name.split(':').collect();
     if parts.len() < 3 {
         return None;
@@ -231,7 +231,7 @@ pub fn launch_minecraft(
     cmd.current_dir(game_dir);
 
     // Memory settings
-    cmd.arg("-Xms2G");
+    cmd.arg("-Xms512M");
     cmd.arg(format!("-Xmx{}G", ram_gb));
 
     // Custom JVM flags
@@ -300,6 +300,13 @@ pub fn launch_minecraft(
         cmd.process_group(0);
     }
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
     // Redirect stdout and stderr to launcher_log.txt in game directory for easy debugging
     let log_file_path = game_dir.join("launcher_log.txt");
     if let Ok(log_file) = fs::File::create(&log_file_path) {
@@ -316,12 +323,24 @@ pub fn launch_minecraft(
     let pid = child.id();
     IS_MINECRAFT_RUNNING.store(true, Ordering::SeqCst);
     let app_handle = app.clone();
+    let game_dir_buf = game_dir.to_path_buf();
 
     std::thread::spawn(move || {
         let _ = app_handle.emit("game-status", true);
-        let _ = child.wait();
+        let wait_res = child.wait();
         IS_MINECRAFT_RUNNING.store(false, Ordering::SeqCst);
         let _ = app_handle.emit("game-status", false);
+
+        if let Ok(exit_status) = wait_res {
+            if !exit_status.success() {
+                let log_file = game_dir_buf.join("launcher_log.txt");
+                if let Ok(log_content) = fs::read_to_string(&log_file) {
+                    let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
+                    let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
+                    let _ = app_handle.emit("game-error", err_summary);
+                }
+            }
+        }
     });
 
     Ok(pid)

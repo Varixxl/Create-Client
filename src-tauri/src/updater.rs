@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use tauri::AppHandle;
 
 pub const CURRENT_VERSION: &str = "1.0.0";

@@ -60,9 +60,14 @@ export const App: React.FC = () => {
       }
     });
 
+    const unlistenErrorPromise = listen<string>("game-error", (event) => {
+      setErrorMsg(`Minecraft process stopped unexpectedly:\n${event.payload}`);
+    });
+
     return () => {
       unlistenProgressPromise.then((unlisten) => unlisten());
       unlistenGamePromise.then((unlisten) => unlisten());
+      unlistenErrorPromise.then((unlisten) => unlisten());
     };
   }, []);
 
