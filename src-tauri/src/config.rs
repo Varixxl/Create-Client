@@ -23,7 +23,7 @@ impl Default for AppConfig {
             game_dir: default_game_dir,
             azure_client_id: DEFAULT_AZURE_CLIENT_ID.to_string(),
             auto_connect: false,
-            release_manifest_url: "https://raw.githubusercontent.com/varixxl/create-client/main/manifest.json".to_string(),
+            release_manifest_url: "https://raw.githubusercontent.com/JaviDaBomb/Create-Client/main/manifest.json".to_string(),
         }
     }
 }
