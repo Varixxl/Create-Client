@@ -1,5 +1,6 @@
 use crate::auth::MinecraftProfile;
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -9,6 +10,97 @@ pub struct VersionMeta {
     pub id: Option<String>,
     #[serde(rename = "mainClass")]
     pub main_class: Option<String>,
+    #[serde(default)]
+    pub libraries: Vec<VersionLibrary>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionLibrary {
+    pub name: Option<String>,
+    #[serde(default)]
+    pub downloads: Option<LibraryDownloads>,
+    pub include_in_classpath: Option<bool>,
+    #[serde(default)]
+    pub rules: Vec<LibraryRule>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryDownloads {
+    pub artifact: Option<LibraryArtifact>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryArtifact {
+    pub path: Option<String>,
+    pub sha1: Option<String>,
+    pub size: Option<u64>,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LibraryRule {
+    pub action: Option<String>,
+    pub os: Option<RuleOs>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RuleOs {
+    pub name: Option<String>,
+}
+
+fn is_rule_allowed(rules: &[LibraryRule]) -> bool {
+    if rules.is_empty() {
+        return true;
+    }
+    let current_os = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "osx"
+    } else {
+        "linux"
+    };
+
+    let mut allowed = false;
+    for r in rules {
+        let action = r.action.as_deref().unwrap_or("");
+        let os_name = r.os.as_ref().and_then(|o| o.name.as_deref());
+        if action == "allow" {
+            if os_name.is_none() || os_name == Some(current_os) {
+                allowed = true;
+            }
+        } else if action == "disallow" {
+            if os_name == Some(current_os) {
+                allowed = false;
+            }
+        }
+    }
+    allowed
+}
+
+fn maven_to_path(name: &str) -> Option<String> {
+    let parts: Vec<&str> = name.split(':').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let group = parts[0].replace('.', "/");
+    let artifact = parts[1];
+    let version = parts[2];
+    let mut classifier = String::new();
+    let mut ext = "jar".to_string();
+
+    if parts.len() > 3 {
+        let rem = parts[3];
+        if let Some((c, e)) = rem.split_once('@') {
+            classifier = format!("-{}", c);
+            ext = e.to_string();
+        } else {
+            classifier = format!("-{}", rem);
+        }
+    }
+    Some(format!(
+        "{}/{}/{}/{}-{}{}.{}",
+        group, artifact, version, artifact, version, classifier, ext
+    ))
 }
 
 pub fn launch_minecraft(
@@ -29,20 +121,57 @@ pub fn launch_minecraft(
     let lib_dir = game_dir.join("libraries");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
 
-    // 1. Gather all classpath libraries
+    // 1. Gather classpath libraries filtered by version.json
     let mut classpath_entries: Vec<PathBuf> = Vec::new();
-    if lib_dir.exists() {
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+
+    let version_file = game_dir.join("version.json");
+    if version_file.exists() {
+        if let Ok(content) = fs::read_to_string(&version_file) {
+            if let Ok(version_meta) = serde_json::from_str::<VersionMeta>(&content) {
+                for lib in version_meta.libraries {
+                    if lib.include_in_classpath == Some(false) {
+                        continue;
+                    }
+                    if !is_rule_allowed(&lib.rules) {
+                        continue;
+                    }
+
+                    let rel_path = lib
+                        .downloads
+                        .as_ref()
+                        .and_then(|d| d.artifact.as_ref())
+                        .and_then(|a| a.path.as_ref())
+                        .cloned()
+                        .or_else(|| lib.name.as_deref().and_then(maven_to_path));
+
+                    if let Some(rel) = rel_path {
+                        let full = lib_dir.join(rel);
+                        if full.exists() && !seen.contains(&full) {
+                            seen.insert(full.clone());
+                            classpath_entries.push(full);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback if version.json wasn't parsed or had no libraries
+    if classpath_entries.is_empty() && lib_dir.exists() {
         collect_jars(&lib_dir, &mut classpath_entries);
     }
 
     // Add vanilla client jar if present
-    let client_jar = game_dir.join("client.jar");
-    if client_jar.exists() {
+    let client_jar = game_dir.join("1.20.1.jar");
+    if client_jar.exists() && !seen.contains(&client_jar) {
+        seen.insert(client_jar.clone());
         classpath_entries.push(client_jar);
     } else {
-        let v_jar = game_dir.join("1.20.1.jar");
-        if v_jar.exists() {
-            classpath_entries.push(v_jar);
+        let alt_jar = game_dir.join("client.jar");
+        if alt_jar.exists() && !seen.contains(&alt_jar) {
+            seen.insert(alt_jar.clone());
+            classpath_entries.push(alt_jar);
         }
     }
 
@@ -108,7 +237,7 @@ pub fn launch_minecraft(
     cmd.arg("-Dminecraft.launcher.brand=CreateClient");
     cmd.arg("-Dminecraft.launcher.version=0.1.0");
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
-    cmd.arg("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-,1.20.1.jar");
+    cmd.arg("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-,1.20.1-47.4.20.jar,1.20.1.jar");
     cmd.arg("-DmergeModules=jna-5.10.0.jar,jna-platform-5.10.0.jar");
     cmd.arg(format!("-DlibraryDirectory={}", lib_dir.to_string_lossy()));
 
@@ -158,6 +287,15 @@ pub fn launch_minecraft(
     #[cfg(unix)]
     {
         cmd.stdin(Stdio::null());
+    }
+
+    // Redirect stdout and stderr to launcher_log.txt in game directory for easy debugging
+    let log_file_path = game_dir.join("launcher_log.txt");
+    if let Ok(log_file) = fs::File::create(&log_file_path) {
+        if let Ok(err_file) = log_file.try_clone() {
+            cmd.stdout(Stdio::from(log_file));
+            cmd.stderr(Stdio::from(err_file));
+        }
     }
 
     let child = cmd
