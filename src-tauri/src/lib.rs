@@ -225,6 +225,11 @@ async fn reset_modpack_settings() -> Result<(), String> {
     downloader::reset_modpack_settings(&game_dir).await
 }
 
+#[tauri::command]
+fn force_close_game(app: AppHandle) -> Result<(), String> {
+    launcher::kill_minecraft(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -240,6 +245,7 @@ pub fn run() {
             sync_modpack,
             launch_game,
             get_game_status,
+            force_close_game,
             get_update_log,
             open_folder,
             open_url,

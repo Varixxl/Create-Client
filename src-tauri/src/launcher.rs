@@ -4,13 +4,49 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::{AppHandle, Emitter};
 
 static IS_MINECRAFT_RUNNING: AtomicBool = AtomicBool::new(false);
+static MINECRAFT_PID: AtomicU32 = AtomicU32::new(0);
+static WAS_FORCE_CLOSED: AtomicBool = AtomicBool::new(false);
 
 pub fn is_minecraft_running() -> bool {
     IS_MINECRAFT_RUNNING.load(Ordering::SeqCst)
+}
+
+pub fn kill_minecraft(app: &AppHandle) -> Result<(), String> {
+    let pid = MINECRAFT_PID.load(Ordering::SeqCst);
+    if pid == 0 || !IS_MINECRAFT_RUNNING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    WAS_FORCE_CLOSED.store(true, Ordering::SeqCst);
+
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill")
+            .args(["-9", &format!("-{}", pid)])
+            .output();
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output();
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+
+    MINECRAFT_PID.store(0, Ordering::SeqCst);
+    IS_MINECRAFT_RUNNING.store(false, Ordering::SeqCst);
+    let _ = app.emit("game-status", false);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -321,23 +357,29 @@ pub fn launch_minecraft(
         .map_err(|e| format!("Failed to spawn Minecraft process: {}", e))?;
 
     let pid = child.id();
+    MINECRAFT_PID.store(pid, Ordering::SeqCst);
     IS_MINECRAFT_RUNNING.store(true, Ordering::SeqCst);
+    WAS_FORCE_CLOSED.store(false, Ordering::SeqCst);
     let app_handle = app.clone();
     let game_dir_buf = game_dir.to_path_buf();
 
     std::thread::spawn(move || {
         let _ = app_handle.emit("game-status", true);
         let wait_res = child.wait();
+        MINECRAFT_PID.store(0, Ordering::SeqCst);
         IS_MINECRAFT_RUNNING.store(false, Ordering::SeqCst);
         let _ = app_handle.emit("game-status", false);
 
-        if let Ok(exit_status) = wait_res {
-            if !exit_status.success() {
-                let log_file = game_dir_buf.join("launcher_log.txt");
-                if let Ok(log_content) = fs::read_to_string(&log_file) {
-                    let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
-                    let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
-                    let _ = app_handle.emit("game-error", err_summary);
+        let was_forced = WAS_FORCE_CLOSED.swap(false, Ordering::SeqCst);
+        if !was_forced {
+            if let Ok(exit_status) = wait_res {
+                if !exit_status.success() {
+                    let log_file = game_dir_buf.join("launcher_log.txt");
+                    if let Ok(log_content) = fs::read_to_string(&log_file) {
+                        let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
+                        let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
+                        let _ = app_handle.emit("game-error", err_summary);
+                    }
                 }
             }
         }

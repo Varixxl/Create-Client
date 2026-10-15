@@ -6,7 +6,7 @@ import { ServerCard } from "./components/ServerCard";
 import { SettingsModal } from "./components/SettingsModal";
 import { ChangelogDrawer } from "./components/ChangelogDrawer";
 import { LoginModal } from "./components/LoginModal";
-import { Play, Flame, AlertCircle, FileText, CheckCircle2, FolderOpen, Check, Sparkles } from "lucide-react";
+import { Play, Flame, AlertCircle, FileText, CheckCircle2, FolderOpen, Check, Sparkles, Square } from "lucide-react";
 import {
   AppConfig,
   AuthStatus,
@@ -39,6 +39,7 @@ export const App: React.FC = () => {
   const [modpackUpdate, setModpackUpdate] = useState<ModpackUpdateInfo | null>(null);
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [isUpdatingClient, setIsUpdatingClient] = useState(false);
+  const [isForceClosing, setIsForceClosing] = useState(false);
   const [updateToast, setUpdateToast] = useState<string | null>(null);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -212,8 +213,8 @@ export const App: React.FC = () => {
       } else if (modpackRes?.has_update) {
         setUpdateToast(`Modpack update available (${modpackRes.latest_version})! Click Update Available below.`);
       } else {
-        const cVer = clientRes?.current_version || "1.0.3";
-        const mVer = modpackRes?.current_version || "1.0.1";
+        const cVer = clientRes?.current_version || "1.0.4";
+        const mVer = modpackRes?.current_version || "1.0.2";
         setUpdateToast(`Everything is up to date! (Client v${cVer} • Modpack v${mVer})`);
         setTimeout(() => setUpdateToast(null), 4000);
       }
@@ -248,7 +249,7 @@ export const App: React.FC = () => {
       setModpackUpdate({
         has_update: true,
         current_version: "Not Installed",
-        latest_version: modpackUpdate?.latest_version || "1.0.1",
+        latest_version: modpackUpdate?.latest_version || "1.0.2",
         changelog: null,
       });
       setUpdateToast("All Create Client game files and mods have been completely deleted.");
@@ -296,6 +297,20 @@ export const App: React.FC = () => {
       setIsSyncing(false);
       setIsLaunching(false);
       setErrorMsg(typeof err === "string" ? err : JSON.stringify(err));
+    }
+  };
+
+  const handleForceClose = async () => {
+    setIsForceClosing(true);
+    try {
+      await invoke("force_close_game");
+      setIsRunning(false);
+      setUpdateToast("Minecraft was force closed.");
+      setTimeout(() => setUpdateToast(null), 3000);
+    } catch (err: any) {
+      setErrorMsg(`Failed to force close: ${err}`);
+    } finally {
+      setIsForceClosing(false);
     }
   };
 
@@ -451,8 +466,20 @@ export const App: React.FC = () => {
               </button>
             </div>
 
-            {/* Right Controls: Play Button & Discord */}
+            {/* Right Controls: Force Close, Play Button & Discord */}
             <div className="flex items-center gap-3">
+              {isRunning && (
+                <button
+                  onClick={handleForceClose}
+                  disabled={isForceClosing}
+                  className="h-14 px-6 rounded-2xl bg-rose-950/80 hover:bg-rose-600 border border-rose-500/60 hover:border-rose-400 text-rose-200 hover:text-white flex items-center gap-2.5 text-xs font-black uppercase tracking-wider transition-all duration-200 cursor-pointer shadow-xl shadow-rose-950/50 hover:scale-[1.02] active:scale-[0.98]"
+                  title="Force Close Minecraft"
+                >
+                  <Square className="w-4 h-4 fill-current text-rose-400" />
+                  <span>{isForceClosing ? "Closing..." : "Force Close"}</span>
+                </button>
+              )}
+
               {/* Launch / Play / Running Button */}
               <button
                 onClick={handlePlay}
