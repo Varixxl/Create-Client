@@ -1,6 +1,6 @@
 import React from "react";
-import { Settings, LogIn, LogOut, Cog, Sparkles } from "lucide-react";
-import { MinecraftProfile } from "../types";
+import { Settings, LogIn, LogOut, Cog, Sparkles, RefreshCw } from "lucide-react";
+import { MinecraftProfile, ClientUpdateInfo } from "../types";
 
 interface HeaderProps {
   profile: MinecraftProfile | null;
@@ -8,8 +8,11 @@ interface HeaderProps {
   onLogin: () => void;
   onLogout: () => void;
   isLoggingIn: boolean;
-  onCheckUpdate: () => void;
-  isCheckingUpdate: boolean;
+  clientUpdate: ClientUpdateInfo | null;
+  onCheckUpdates: () => void;
+  isCheckingUpdates: boolean;
+  onUpdateClient: () => void;
+  isUpdatingClient: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,8 +21,11 @@ export const Header: React.FC<HeaderProps> = ({
   onLogin,
   onLogout,
   isLoggingIn,
-  onCheckUpdate,
-  isCheckingUpdate,
+  clientUpdate,
+  onCheckUpdates,
+  isCheckingUpdates,
+  onUpdateClient,
+  isUpdatingClient,
 }) => {
   return (
     <header className="h-16 px-6 bg-[#182232]/95 border-b border-[#2a384c] flex items-center justify-between backdrop-blur-md z-20 shadow-md">
@@ -42,7 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right controls: User Profile & Settings */}
+      {/* Right controls: User Profile & Actions */}
       <div className="flex items-center gap-3">
         {profile ? (
           <div className="flex items-center gap-3 bg-[#0e121a] border border-[#2a384c] hover:border-[#12c3ca]/60 transition-colors rounded-full pl-1.5 pr-3 py-1 shadow-inner">
@@ -80,16 +86,39 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {/* Update Client button */}
+        {/* Check for Updates button */}
         <button
-          onClick={onCheckUpdate}
-          disabled={isCheckingUpdate}
-          title="Check for Client Updates"
+          onClick={onCheckUpdates}
+          disabled={isCheckingUpdates}
+          title="Check for Launcher and Modpack Updates"
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0e121a] border border-[#2a384c] text-[#8fa0bc] hover:text-[#12c3ca] hover:border-[#12c3ca]/60 transition-all cursor-pointer shadow-sm hover:shadow-cyan-950/30 text-xs font-bold disabled:opacity-60"
         >
-          <Sparkles className={`w-3.5 h-3.5 text-[#12c3ca] ${isCheckingUpdate ? "animate-spin" : ""}`} />
-          <span className="hidden md:inline">Update Client</span>
+          <RefreshCw className={`w-3.5 h-3.5 text-[#12c3ca] ${isCheckingUpdates ? "animate-spin" : ""}`} />
+          <span className="hidden sm:inline">Check for Updates</span>
         </button>
+
+        {/* Update Client / Update Available button */}
+        {clientUpdate?.has_update ? (
+          <button
+            onClick={onUpdateClient}
+            disabled={isUpdatingClient}
+            title={`Install Create Client ${clientUpdate.latest_version}`}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-gradient-to-r from-amber-500/25 via-amber-400/25 to-amber-500/25 border border-amber-400/80 text-amber-300 hover:brightness-125 transition-all cursor-pointer shadow-lg shadow-amber-950/50 text-xs font-extrabold animate-pulse"
+          >
+            <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${isUpdatingClient ? "animate-spin" : ""}`} />
+            <span>{isUpdatingClient ? "Updating Client..." : "Update Available"}</span>
+          </button>
+        ) : (
+          <button
+            onClick={onCheckUpdates}
+            disabled={isCheckingUpdates}
+            title="Create Client is up to date"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0e121a] border border-[#2a384c] text-[#8fa0bc] hover:text-[#12c3ca] hover:border-[#12c3ca]/60 transition-all cursor-pointer shadow-sm hover:shadow-cyan-950/30 text-xs font-bold disabled:opacity-60"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-[#12c3ca]" />
+            <span className="hidden md:inline">Update Client</span>
+          </button>
+        )}
 
         {/* Settings button */}
         <button

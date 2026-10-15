@@ -54,6 +54,14 @@ pub struct InstalledVersion {
     pub installed_at: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModpackUpdateInfo {
+    pub has_update: bool,
+    pub current_version: String,
+    pub latest_version: String,
+    pub changelog: Option<String>,
+}
+
 pub fn get_runtime_dir() -> PathBuf {
     if let Some(proj_dirs) = directories::ProjectDirs::from("com", "create", "CreateClient") {
         proj_dirs.data_dir().join("runtime")
@@ -216,24 +224,19 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
     Ok(final_bin)
 }
 
-pub async fn check_and_sync_modpack(
-    app: &AppHandle,
-    game_dir: &Path,
-    manifest_url: &str,
-    force_repair: bool,
-) -> Result<String, String> {
-    fs::create_dir_all(game_dir).map_err(|e| format!("Failed to create game directory: {}", e))?;
-
+pub fn get_installed_version(game_dir: &Path) -> Option<String> {
     let version_file = game_dir.join("client_version.json");
-    let mut current_version: Option<String> = if version_file.exists() && !force_repair {
+    if version_file.exists() {
         fs::read_to_string(&version_file)
             .ok()
             .and_then(|c| serde_json::from_str::<InstalledVersion>(&c).ok())
             .map(|v| v.version)
     } else {
         None
-    };
+    }
+}
 
+pub async fn fetch_manifest(manifest_url: &str) -> Result<ModpackManifest, String> {
     let client = Client::new();
     let now_ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -273,17 +276,98 @@ pub async fn check_and_sync_modpack(
     };
 
     if !res.status().is_success() {
-        if let Some(ver) = current_version {
-            // If offline or manifest fails, proceed with existing local version
-            return Ok(ver);
-        }
         return Err(format!("Could not fetch modpack manifest (HTTP {})", res.status()));
     }
 
-    let manifest: ModpackManifest = res
-        .json()
+    res.json::<ModpackManifest>()
         .await
-        .map_err(|e| format!("Failed to parse modpack manifest: {}", e))?;
+        .map_err(|e| format!("Failed to parse modpack manifest: {}", e))
+}
+
+pub async fn check_modpack_update(game_dir: &Path, manifest_url: &str) -> Result<ModpackUpdateInfo, String> {
+    let current_ver = get_installed_version(game_dir);
+    let manifest = match fetch_manifest(manifest_url).await {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(ModpackUpdateInfo {
+                has_update: false,
+                current_version: current_ver.unwrap_or_else(|| "Not Installed".to_string()),
+                latest_version: "Unknown".to_string(),
+                changelog: None,
+            });
+        }
+    };
+
+    let has_update = current_ver.as_ref() != Some(&manifest.latest_version);
+
+    Ok(ModpackUpdateInfo {
+        has_update,
+        current_version: current_ver.unwrap_or_else(|| "Not Installed".to_string()),
+        latest_version: manifest.latest_version.clone(),
+        changelog: manifest.changelog,
+    })
+}
+
+pub fn delete_all_game_data(game_dir: &Path) -> Result<(), String> {
+    if game_dir.exists() {
+        let entries = fs::read_dir(game_dir).map_err(|e| format!("Failed to read game directory: {}", e))?;
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                let _ = fs::remove_dir_all(&p);
+            } else {
+                let _ = fs::remove_file(&p);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub async fn reset_modpack_settings(game_dir: &Path) -> Result<(), String> {
+    let _ = fs::create_dir_all(game_dir);
+    let options_file = game_dir.join("options.txt");
+    let client = Client::new();
+    let raw_url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/options.txt";
+    if let Ok(res) = client.get(raw_url).send().await {
+        if res.status().is_success() {
+            if let Ok(bytes) = res.bytes().await {
+                let _ = fs::write(&options_file, bytes);
+                return Ok(());
+            }
+        }
+    }
+    let local = Path::new("/home/varixxl/create-modpack/options.txt");
+    if local.exists() {
+        let _ = fs::copy(local, &options_file);
+        return Ok(());
+    }
+    Err("Could not fetch default options.txt".to_string())
+}
+
+pub async fn check_and_sync_modpack(
+    app: &AppHandle,
+    game_dir: &Path,
+    manifest_url: &str,
+    force_repair: bool,
+) -> Result<String, String> {
+    fs::create_dir_all(game_dir).map_err(|e| format!("Failed to create game directory: {}", e))?;
+
+    let version_file = game_dir.join("client_version.json");
+    let mut current_version: Option<String> = if force_repair {
+        None
+    } else {
+        get_installed_version(game_dir)
+    };
+
+    let manifest = match fetch_manifest(manifest_url).await {
+        Ok(m) => m,
+        Err(e) => {
+            if let Some(ver) = current_version {
+                return Ok(ver);
+            }
+            return Err(e);
+        }
+    };
 
     if Some(&manifest.latest_version) == current_version.as_ref() && !force_repair {
         return Ok(manifest.latest_version);

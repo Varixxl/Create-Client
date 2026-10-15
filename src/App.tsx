@@ -6,7 +6,7 @@ import { ServerCard } from "./components/ServerCard";
 import { SettingsModal } from "./components/SettingsModal";
 import { ChangelogDrawer } from "./components/ChangelogDrawer";
 import { LoginModal } from "./components/LoginModal";
-import { Play, Flame, AlertCircle, FileText, CheckCircle2, FolderOpen, Check } from "lucide-react";
+import { Play, Flame, AlertCircle, FileText, CheckCircle2, FolderOpen, Check, Sparkles } from "lucide-react";
 import {
   AppConfig,
   AuthStatus,
@@ -14,6 +14,8 @@ import {
   ProgressPayload,
   ServerStatus,
   DeviceCodeInfo,
+  ClientUpdateInfo,
+  ModpackUpdateInfo,
 } from "./types";
 
 export const App: React.FC = () => {
@@ -33,7 +35,10 @@ export const App: React.FC = () => {
   const [isRefreshingServer, setIsRefreshingServer] = useState(false);
   const [launchSuccess, setLaunchSuccess] = useState(false);
 
-  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [clientUpdate, setClientUpdate] = useState<ClientUpdateInfo | null>(null);
+  const [modpackUpdate, setModpackUpdate] = useState<ModpackUpdateInfo | null>(null);
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [isUpdatingClient, setIsUpdatingClient] = useState(false);
   const [updateToast, setUpdateToast] = useState<string | null>(null);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -44,6 +49,7 @@ export const App: React.FC = () => {
     loadConfig();
     checkAuth();
     refreshServer();
+    handleCheckAllUpdates(false);
 
     invoke<boolean>("get_game_status")
       .then((running) => setIsRunning(running))
@@ -175,39 +181,90 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCheckClientUpdate = async () => {
-    setIsCheckingUpdate(true);
-    setUpdateToast(null);
-    try {
-      const info = await invoke<{
-        has_update: boolean;
-        current_version: string;
-        latest_version: string;
-        download_url: string | null;
-        release_url: string;
-        changelog: string | null;
-      }>("check_client_update");
+  const handleCheckAllUpdates = async (manual = false) => {
+    setIsCheckingUpdates(true);
+    if (manual) setUpdateToast(null);
 
-      if (info.has_update) {
-        if (info.download_url) {
-          setUpdateToast(`Downloading ${info.latest_version}...`);
-          const res = await invoke<string>("perform_client_update", {
-            downloadUrl: info.download_url,
-          });
-          setUpdateToast(res);
-        } else {
-          setUpdateToast(`New version ${info.latest_version} available! Opening releases page...`);
-          await invoke("open_url", { url: info.release_url });
-        }
+    let clientRes: ClientUpdateInfo | null = null;
+    let modpackRes: ModpackUpdateInfo | null = null;
+
+    try {
+      clientRes = await invoke<ClientUpdateInfo>("check_client_update");
+      setClientUpdate(clientRes);
+    } catch (err) {
+      console.warn("Client update check failed:", err);
+    }
+
+    try {
+      modpackRes = await invoke<ModpackUpdateInfo>("check_modpack_update");
+      setModpackUpdate(modpackRes);
+    } catch (err) {
+      console.warn("Modpack update check failed:", err);
+    }
+
+    setIsCheckingUpdates(false);
+
+    if (manual) {
+      if (clientRes?.has_update && modpackRes?.has_update) {
+        setUpdateToast(`Updates available: Client (${clientRes.latest_version}) & Modpack (${modpackRes.latest_version})`);
+      } else if (clientRes?.has_update) {
+        setUpdateToast(`Client update available (${clientRes.latest_version})! Click Update Available above.`);
+      } else if (modpackRes?.has_update) {
+        setUpdateToast(`Modpack update available (${modpackRes.latest_version})! Click Update Available below.`);
       } else {
-        setUpdateToast(`Create Client is up to date (${info.current_version})`);
+        const cVer = clientRes?.current_version || "1.0.3";
+        const mVer = modpackRes?.current_version || "1.0.1";
+        setUpdateToast(`Everything is up to date! (Client v${cVer} • Modpack v${mVer})`);
         setTimeout(() => setUpdateToast(null), 4000);
       }
+    }
+  };
+
+  const handlePerformClientUpdate = async () => {
+    if (!clientUpdate?.download_url) {
+      if (clientUpdate?.release_url) {
+        await invoke("open_url", { url: clientUpdate.release_url });
+      }
+      return;
+    }
+    setIsUpdatingClient(true);
+    setUpdateToast(`Downloading Create Client ${clientUpdate.latest_version}...`);
+    try {
+      const res = await invoke<string>("perform_client_update", {
+        downloadUrl: clientUpdate.download_url,
+      });
+      setUpdateToast(res);
     } catch (err: any) {
-      setUpdateToast(`Update check failed: ${err}`);
-      setTimeout(() => setUpdateToast(null), 4000);
+      setUpdateToast(`Update failed: ${err}`);
+      setTimeout(() => setUpdateToast(null), 5000);
     } finally {
-      setIsCheckingUpdate(false);
+      setIsUpdatingClient(false);
+    }
+  };
+
+  const handleDeleteAllFiles = async () => {
+    try {
+      await invoke("delete_all_game_data");
+      setModpackUpdate({
+        has_update: true,
+        current_version: "Not Installed",
+        latest_version: modpackUpdate?.latest_version || "1.0.1",
+        changelog: null,
+      });
+      setUpdateToast("All Create Client game files and mods have been completely deleted.");
+      setTimeout(() => setUpdateToast(null), 5000);
+    } catch (err: any) {
+      setErrorMsg(`Failed to delete game files: ${err}`);
+    }
+  };
+
+  const handleResetDefaults = async () => {
+    try {
+      await invoke("reset_modpack_settings");
+      setUpdateToast("Modpack settings (options.txt) restored to official defaults.");
+      setTimeout(() => setUpdateToast(null), 4000);
+    } catch (err: any) {
+      setErrorMsg(`Failed to reset settings: ${err}`);
     }
   };
 
@@ -222,6 +279,7 @@ export const App: React.FC = () => {
     setIsSyncing(true);
     try {
       await invoke("sync_modpack", { forceRepair: false });
+      setModpackUpdate((prev) => prev ? { ...prev, has_update: false, current_version: prev.latest_version } : null);
 
       setIsSyncing(false);
       setIsLaunching(true);
@@ -275,8 +333,11 @@ export const App: React.FC = () => {
         onLogin={handleLogin}
         onLogout={handleLogout}
         isLoggingIn={isLoggingIn}
-        onCheckUpdate={handleCheckClientUpdate}
-        isCheckingUpdate={isCheckingUpdate}
+        clientUpdate={clientUpdate}
+        onCheckUpdates={() => handleCheckAllUpdates(true)}
+        isCheckingUpdates={isCheckingUpdates}
+        onUpdateClient={handlePerformClientUpdate}
+        isUpdatingClient={isUpdatingClient}
       />
 
       {/* Main Hero & Dashboard Area */}
@@ -405,6 +466,8 @@ export const App: React.FC = () => {
                     ? "bg-[#182232] text-[#8fa0bc] border border-[#263042] cursor-not-allowed opacity-80"
                     : !profile
                     ? "bg-gradient-to-r from-[#0d949b] to-[#12c3ca] hover:from-[#12c3ca] hover:to-[#5ce1e6] text-slate-950 shadow-cyan-950/60 hover:scale-[1.02] cursor-pointer"
+                    : modpackUpdate?.has_update
+                    ? "bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 hover:brightness-110 text-slate-950 shadow-amber-950/80 hover:scale-[1.02] active:scale-[0.98] cursor-pointer animate-pulse"
                     : "bg-gradient-to-r from-[#0d949b] via-[#12c3ca] to-[#5ce1e6] hover:brightness-110 text-slate-950 shadow-cyan-950/70 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                 }`}
               >
@@ -432,6 +495,11 @@ export const App: React.FC = () => {
                   <>
                     <Play className="w-5 h-5 fill-current" />
                     <span>Sign In & Play</span>
+                  </>
+                ) : modpackUpdate?.has_update ? (
+                  <>
+                    <Sparkles className="w-6 h-6 fill-current text-slate-950 animate-bounce" />
+                    <span>Update Available</span>
                   </>
                 ) : (
                   <>
@@ -466,6 +534,8 @@ export const App: React.FC = () => {
           onSaveConfig={handleSaveConfig}
           onOpenFolder={handleOpenFolder}
           onForceRepair={handleForceRepair}
+          onDeleteAllFiles={handleDeleteAllFiles}
+          onResetDefaults={handleResetDefaults}
         />
       )}
 

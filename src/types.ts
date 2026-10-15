@@ -46,3 +46,20 @@ export interface DeviceCodeInfo {
   expires_in: number;
   interval: number;
 }
+
+export interface ClientUpdateInfo {
+  has_update: boolean;
+  current_version: string;
+  latest_version: string;
+  download_url: string | null;
+  asset_name: string | null;
+  release_url: string;
+  changelog: string | null;
+}
+
+export interface ModpackUpdateInfo {
+  has_update: boolean;
+  current_version: string;
+  latest_version: string;
+  changelog: string | null;
+}

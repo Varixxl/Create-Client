@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, FolderOpen, Wrench, Check, RotateCcw } from "lucide-react";
+import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle } from "lucide-react";
 import { AppConfig } from "../types";
 
 interface SettingsModalProps {
@@ -9,6 +9,8 @@ interface SettingsModalProps {
   onSaveConfig: (updated: AppConfig) => Promise<void>;
   onOpenFolder: (path: string) => void;
   onForceRepair: () => void;
+  onDeleteAllFiles: () => Promise<void>;
+  onResetDefaults: () => Promise<void>;
 }
 
 const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+AlwaysPreTouch";
@@ -20,11 +22,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaveConfig,
   onOpenFolder,
   onForceRepair,
+  onDeleteAllFiles,
+  onResetDefaults,
 }) => {
   const [ram, setRam] = useState(config.ram_gb);
   const [jvmFlags, setJvmFlags] = useState(config.jvm_flags);
   const [gameDir, setGameDir] = useState(config.game_dir);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isResettingDefaults, setIsResettingDefaults] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   if (!isOpen) return null;
 
@@ -43,10 +52,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }, 500);
   };
 
+  const handleResetDefaults = async () => {
+    setIsResettingDefaults(true);
+    try {
+      await onResetDefaults();
+      setResetSuccess(true);
+      setTimeout(() => setResetSuccess(false), 2500);
+    } finally {
+      setIsResettingDefaults(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    setIsDeleting(true);
+    try {
+      await onDeleteAllFiles();
+      setIsConfirmingDelete(false);
+      onClose();
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-[#0e121af5] border border-[#263042] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-        {/* FancyMenu Modal Header */}
+      <div className="bg-[#0e121af5] border border-[#263042] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
+        {/* Modal Header */}
         <div className="px-5 py-3.5 bg-[#182232] border-b border-[#263042] flex items-center justify-between">
           <div className="flex items-center gap-1.5 font-mono text-sm">
             <span className="font-extrabold text-[#f59e0b]">CLIENT SETTINGS</span>
@@ -138,21 +169,79 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* Troubleshooting */}
-          <div className="pt-3 border-t border-[#1c2432]">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-[#e4e8ee] text-xs">Troubleshooting & Integrity</h3>
-                <p className="text-[11px] text-[#8fa0bc]">Re-verify and repair corrupted modpack files</p>
-              </div>
+          {/* Troubleshooting & Integrity */}
+          <div className="pt-3 border-t border-[#1c2432] space-y-3">
+            <div>
+              <h3 className="font-bold text-[#e4e8ee] text-xs">Troubleshooting & Integrity</h3>
+              <p className="text-[11px] text-[#8fa0bc]">Re-verify modpack files or restore modpack video/graphic defaults</p>
+            </div>
+            <div className="flex flex-wrap gap-2.5">
               <button
                 type="button"
                 onClick={onForceRepair}
-                className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="px-3.5 py-2 bg-[#182232] hover:bg-[#242e3e] text-amber-300 border border-amber-500/40 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
               >
-                <Wrench className="w-3.5 h-3.5" />
-                Repair Files
+                <Wrench className="w-3.5 h-3.5 text-amber-400" />
+                <span>Verify & Repair Files</span>
               </button>
+              <button
+                type="button"
+                onClick={handleResetDefaults}
+                disabled={isResettingDefaults}
+                className="px-3.5 py-2 bg-[#182232] hover:bg-[#242e3e] text-[#5ce1e6] border border-[#12c3ca]/40 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 text-[#12c3ca] ${isResettingDefaults ? "animate-spin" : ""}`} />
+                <span>{resetSuccess ? "Settings Restored to Defaults!" : isResettingDefaults ? "Restoring..." : "Reset to Modpack Defaults"}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Danger Zone: Complete File Reset */}
+          <div className="pt-3 border-t border-red-950/50">
+            <div className="p-4 rounded-xl bg-red-950/20 border border-red-500/40 space-y-3">
+              <div className="flex items-center gap-2 text-red-400 font-bold text-xs uppercase tracking-wider">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                <span>Danger Zone</span>
+              </div>
+              <p className="text-[11px] text-[#8fa0bc] leading-relaxed">
+                Completely deletes all game files, mods, configs, saves, and screenshots related to Create Client for a 100% clean factory reset.
+              </p>
+
+              {isConfirmingDelete ? (
+                <div className="p-3 bg-red-950/80 border border-red-500 rounded-lg space-y-2.5">
+                  <p className="text-xs font-bold text-red-200">
+                    Are you sure? This will delete all files related to Create Client and mods. This action cannot be undone!
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={handleDeleteAll}
+                      className="px-3.5 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-md shadow-red-950/60"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{isDeleting ? "Deleting All Files..." : "Yes, Delete Everything"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={() => setIsConfirmingDelete(false)}
+                      className="px-3.5 py-1.5 bg-[#182232] hover:bg-[#242e3e] text-[#8fa0bc] hover:text-[#e4e8ee] border border-[#263042] text-xs font-medium rounded-lg transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingDelete(true)}
+                  className="px-3.5 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/40 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm hover:border-red-400"
+                >
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                  <span>Delete All Files</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

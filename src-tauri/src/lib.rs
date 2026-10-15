@@ -204,6 +204,27 @@ async fn perform_client_update(app: AppHandle, download_url: String) -> Result<S
     updater::perform_update(&app, &download_url).await
 }
 
+#[tauri::command]
+async fn check_modpack_update() -> Result<downloader::ModpackUpdateInfo, String> {
+    let cfg = config::load_config();
+    let game_dir = PathBuf::from(&cfg.game_dir);
+    downloader::check_modpack_update(&game_dir, &cfg.release_manifest_url).await
+}
+
+#[tauri::command]
+fn delete_all_game_data() -> Result<(), String> {
+    let cfg = config::load_config();
+    let game_dir = PathBuf::from(&cfg.game_dir);
+    downloader::delete_all_game_data(&game_dir)
+}
+
+#[tauri::command]
+async fn reset_modpack_settings() -> Result<(), String> {
+    let cfg = config::load_config();
+    let game_dir = PathBuf::from(&cfg.game_dir);
+    downloader::reset_modpack_settings(&game_dir).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -223,7 +244,10 @@ pub fn run() {
             open_folder,
             open_url,
             check_client_update,
-            perform_client_update
+            perform_client_update,
+            check_modpack_update,
+            delete_all_game_data,
+            reset_modpack_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -34,4 +34,5 @@ dist-modpack
 *.AppImage
 *.deb
 *.rpm
+release_v*/
 
