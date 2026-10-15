@@ -163,6 +163,9 @@ pub fn launch_minecraft(
         return Err(format!("Game directory not found at: {:?}", game_dir));
     }
 
+    // Sanitize options.txt to ensure native resolution without legacy override constraints
+    sanitize_options_txt(game_dir);
+
     let lib_dir = game_dir.join("libraries");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
 
@@ -400,6 +403,30 @@ fn collect_jars(dir: &Path, jars: &mut Vec<PathBuf>) {
                 collect_jars(&path, jars);
             } else if path.extension().and_then(|s| s.to_str()) == Some("jar") {
                 jars.push(path);
+            }
+        }
+    }
+}
+
+pub fn sanitize_options_txt(game_dir: &Path) {
+    let options_file = game_dir.join("options.txt");
+    if options_file.exists() {
+        if let Ok(content) = fs::read_to_string(&options_file) {
+            let mut modified = false;
+            let mut new_lines = Vec::new();
+            for line in content.lines() {
+                if line.starts_with("overrideWidth:") && line != "overrideWidth:0" {
+                    new_lines.push("overrideWidth:0".to_string());
+                    modified = true;
+                } else if line.starts_with("overrideHeight:") && line != "overrideHeight:0" {
+                    new_lines.push("overrideHeight:0".to_string());
+                    modified = true;
+                } else {
+                    new_lines.push(line.to_string());
+                }
+            }
+            if modified {
+                let _ = fs::write(&options_file, new_lines.join("\n") + "\n");
             }
         }
     }
