@@ -229,12 +229,42 @@ pub async fn check_and_sync_modpack(
     };
 
     let client = Client::new();
-    let res = client
-        .get(manifest_url)
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let cache_bust_url = if manifest_url.contains('?') {
+        format!("{}&_nocache={}", manifest_url, now_ts)
+    } else {
+        format!("{}?_nocache={}", manifest_url, now_ts)
+    };
+
+    let fetch_result = client
+        .get(&cache_bust_url)
         .header("User-Agent", "CreateClient-Launcher")
+        .header("Cache-Control", "no-cache, no-store, must-revalidate")
+        .header("Pragma", "no-cache")
         .send()
-        .await
-        .map_err(|e| format!("Failed to check modpack manifest: {}", e))?;
+        .await;
+
+    let res = match fetch_result {
+        Ok(r) if r.status().is_success() => r,
+        _ => {
+            let fallback_url = format!(
+                "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json?_nocache={}",
+                now_ts
+            );
+            client
+                .get(&fallback_url)
+                .header("User-Agent", "CreateClient-Launcher")
+                .header("Cache-Control", "no-cache, no-store, must-revalidate")
+                .header("Pragma", "no-cache")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to check modpack manifest: {}", e))?
+        }
+    };
 
     if !res.status().is_success() {
         if let Some(ver) = current_version {

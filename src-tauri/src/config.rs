@@ -60,7 +60,10 @@ pub fn load_config() -> AppConfig {
                     config.azure_client_id = DEFAULT_AZURE_CLIENT_ID.to_string();
                     changed = true;
                 }
-                if config.release_manifest_url.contains("Create-Client/main/manifest.json") {
+                if config.release_manifest_url.contains("Create-Client")
+                    || config.release_manifest_url.contains("varixxl")
+                    || config.release_manifest_url.trim().is_empty()
+                {
                     config.release_manifest_url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string();
                     changed = true;
                 }
