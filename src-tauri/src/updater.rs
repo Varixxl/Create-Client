@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-pub const CURRENT_VERSION: &str = "1.0.0";
+pub const CURRENT_VERSION: &str = "1.0.1";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientUpdateInfo {
@@ -145,9 +145,19 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
     #[cfg(target_os = "windows")]
     {
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let update_exe = current_exe.with_extension("new.exe");
-        fs::write(&update_exe, &bytes).map_err(|e| format!("Failed to write update: {}", e))?;
-        Ok("Update downloaded to create-client.new.exe. Please restart to apply.".to_string())
+        let old_exe = current_exe.with_extension("old");
+        let _ = fs::remove_file(&old_exe);
+
+        // Rename running exe to .old (NTFS allows renaming executing binaries)
+        fs::rename(&current_exe, &old_exe).map_err(|e| format!("Failed to rename running executable: {}", e))?;
+
+        // Write new binary directly to current_exe
+        if let Err(e) = fs::write(&current_exe, &bytes) {
+            let _ = fs::rename(&old_exe, &current_exe);
+            return Err(format!("Failed to write updated executable: {}", e));
+        }
+
+        Ok("Create Client updated successfully! Please restart the launcher to apply changes.".to_string())
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
