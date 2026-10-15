@@ -82,7 +82,10 @@ async fn sync_modpack(app: AppHandle, force_repair: bool) -> Result<String, Stri
     let runtime_dir = downloader::get_runtime_dir();
     let _ = downloader::ensure_java(&app, &runtime_dir).await?;
 
-    // 2. Synchronize modpack files from GitHub release manifest
+    // 2. Ensure Minecraft Assets
+    let _ = downloader::ensure_assets(&game_dir).await;
+
+    // 3. Synchronize modpack files from GitHub release manifest
     if !cfg.release_manifest_url.trim().is_empty() {
         downloader::check_and_sync_modpack(&app, &game_dir, &cfg.release_manifest_url, force_repair).await
     } else {
@@ -103,7 +106,47 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
 
     // Launch Forge process
-    launcher::launch_minecraft(&java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags)
+    launcher::launch_minecraft(&java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)
+}
+
+#[tauri::command]
+async fn get_update_log() -> Result<String, String> {
+    // 1. Check local create-modpack FancyMenu updatelog
+    let local_path = PathBuf::from("/home/varixxl/create-modpack/config/fancymenu/customization/updatelog_layout.txt");
+    if local_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&local_path) {
+            if let Some(text) = extract_fancymenu_text(&content) {
+                return Ok(text);
+            }
+        }
+    }
+
+    // 2. Fallback: fetch from GitHub raw
+    let client = reqwest::Client::new();
+    let url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/config/fancymenu/customization/updatelog_layout.txt";
+    if let Ok(res) = client.get(url).send().await {
+        if res.status().is_success() {
+            if let Ok(content) = res.text().await {
+                if let Some(text) = extract_fancymenu_text(&content) {
+                    return Ok(text);
+                }
+            }
+        }
+    }
+
+    Ok("Create Server Update Log currently unavailable.".to_string())
+}
+
+fn extract_fancymenu_text(layout: &str) -> Option<String> {
+    for line in layout.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("source = ") {
+            let raw = &trimmed["source = ".len()..];
+            let clean = raw.replace("%n%", "\n");
+            return Some(clean);
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -129,6 +172,7 @@ pub fn run() {
             get_server_status,
             sync_modpack,
             launch_game,
+            get_update_log,
             open_folder
         ])
         .run(tauri::generate_context!())

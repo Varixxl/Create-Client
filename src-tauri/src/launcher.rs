@@ -9,8 +9,6 @@ pub struct VersionMeta {
     pub id: Option<String>,
     #[serde(rename = "mainClass")]
     pub main_class: Option<String>,
-    #[serde(rename = "minecraftArguments")]
-    pub minecraft_arguments: Option<String>,
 }
 
 pub fn launch_minecraft(
@@ -19,6 +17,7 @@ pub fn launch_minecraft(
     profile: &MinecraftProfile,
     ram_gb: u32,
     custom_jvm_flags: &str,
+    auto_connect: bool,
 ) -> Result<u32, String> {
     if !java_bin.exists() {
         return Err(format!("Java executable not found at: {:?}", java_bin));
@@ -27,16 +26,16 @@ pub fn launch_minecraft(
         return Err(format!("Game directory not found at: {:?}", game_dir));
     }
 
-    // 1. Gather all jars for classpath
-    let mut classpath_entries: Vec<PathBuf> = Vec::new();
-
-    // Check libraries directory
     let lib_dir = game_dir.join("libraries");
+    let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
+
+    // 1. Gather all classpath libraries
+    let mut classpath_entries: Vec<PathBuf> = Vec::new();
     if lib_dir.exists() {
         collect_jars(&lib_dir, &mut classpath_entries);
     }
 
-    // Check client jar
+    // Add vanilla client jar if present
     let client_jar = game_dir.join("client.jar");
     if client_jar.exists() {
         classpath_entries.push(client_jar);
@@ -47,29 +46,49 @@ pub fn launch_minecraft(
         }
     }
 
-    let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
     let classpath = classpath_entries
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect::<Vec<_>>()
         .join(separator);
 
-    // 2. Read version.json for mainClass if present
-    let version_json_path = game_dir.join("version.json");
-    let main_class = if version_json_path.exists() {
-        fs::read_to_string(&version_json_path)
-            .ok()
-            .and_then(|c| serde_json::from_str::<VersionMeta>(&c).ok())
-            .and_then(|v| v.main_class)
-            .unwrap_or_else(|| "net.minecraftforge.bootstrap.ForgeBootstrap".to_string())
+    // 2. Module Path (Required for Java 17 Forge 1.20.1)
+    let module_relative_jars = [
+        "cpw/mods/bootstraplauncher/1.1.2/bootstraplauncher-1.1.2.jar",
+        "cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar",
+        "org/ow2/asm/asm-commons/9.9.1/asm-commons-9.9.1.jar",
+        "org/ow2/asm/asm-util/9.9.1/asm-util-9.9.1.jar",
+        "org/ow2/asm/asm-analysis/9.9.1/asm-analysis-9.9.1.jar",
+        "org/ow2/asm/asm-tree/9.9.1/asm-tree-9.9.1.jar",
+        "org/ow2/asm/asm/9.9.1/asm-9.9.1.jar",
+        "net/minecraftforge/JarJarFileSystems/0.3.19/JarJarFileSystems-0.3.19.jar",
+    ];
+
+    let module_path = module_relative_jars
+        .iter()
+        .map(|rel| lib_dir.join(rel).to_string_lossy().to_string())
+        .filter(|p| Path::new(p).exists())
+        .collect::<Vec<_>>()
+        .join(separator);
+
+    // 3. Main class
+    let main_class = "cpw.mods.bootstraplauncher.BootstrapLauncher".to_string();
+
+    // 4. Assets Directory
+    let assets_dir = if game_dir.join("assets").join("indexes").join("5.json").exists() {
+        game_dir.join("assets")
     } else {
-        "net.minecraftforge.bootstrap.ForgeBootstrap".to_string()
+        let modrinth_assets = PathBuf::from("/home/varixxl/.local/share/ModrinthApp/meta/assets");
+        if modrinth_assets.join("indexes").join("5.json").exists() {
+            modrinth_assets
+        } else {
+            game_dir.join("assets")
+        }
     };
 
-    let assets_dir = game_dir.join("assets");
     let natives_dir = game_dir.join("natives");
 
-    // 3. Build command arguments
+    // 5. Build Command
     let mut cmd = Command::new(java_bin);
     cmd.current_dir(game_dir);
 
@@ -84,15 +103,28 @@ pub fn launch_minecraft(
         }
     }
 
-    // Standard Minecraft JVM properties
+    // Standard JVM Properties
     cmd.arg(format!("-Djava.library.path={}", natives_dir.to_string_lossy()));
     cmd.arg("-Dminecraft.launcher.brand=CreateClient");
     cmd.arg("-Dminecraft.launcher.version=0.1.0");
+    cmd.arg("-Djava.net.preferIPv6Addresses=system");
+    cmd.arg("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-,1.20.1.jar");
+    cmd.arg("-DmergeModules=jna-5.10.0.jar,jna-platform-5.10.0.jar");
+    cmd.arg(format!("-DlibraryDirectory={}", lib_dir.to_string_lossy()));
+
+    // Module-path configuration
+    if !module_path.is_empty() {
+        cmd.arg("-p").arg(&module_path);
+        cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
+        cmd.arg("--add-opens").arg("java.base/java.util.jar=cpw.mods.securejarhandler");
+        cmd.arg("--add-opens").arg("java.base/java.lang.invoke=cpw.mods.securejarhandler");
+        cmd.arg("--add-exports").arg("java.base/sun.security.util=cpw.mods.securejarhandler");
+        cmd.arg("--add-exports").arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
+    }
 
     // Classpath
     if !classpath.is_empty() {
-        cmd.arg("-cp");
-        cmd.arg(&classpath);
+        cmd.arg("-cp").arg(&classpath);
     }
 
     // Main Class
@@ -106,16 +138,25 @@ pub fn launch_minecraft(
     cmd.arg("--assetIndex").arg("5");
     cmd.arg("--uuid").arg(&profile.uuid);
     cmd.arg("--accessToken").arg(&profile.access_token);
+    cmd.arg("--clientId").arg("43e4ff18-9c63-455f-9224-a124a6b71086");
+    cmd.arg("--xuid").arg("0");
     cmd.arg("--userType").arg("msa");
     cmd.arg("--versionType").arg("Forge");
 
-    // Ensure servers.dat exists with Create Server if not present
-    ensure_default_server_in_game_dir(game_dir);
+    // Forge specific arguments
+    cmd.arg("--launchTarget").arg("forgeclient");
+    cmd.arg("--fml.forgeVersion").arg("47.4.20");
+    cmd.arg("--fml.mcVersion").arg("1.20.1");
+    cmd.arg("--fml.forgeGroup").arg("net.minecraftforge");
+    cmd.arg("--fml.mcpVersion").arg("20230612.114412");
 
-    // Spawn process
+    // Auto-connect to Create Server if configured
+    if auto_connect {
+        cmd.arg("--quickPlayMultiplayer").arg("argon.dathost.net:17155");
+    }
+
     #[cfg(unix)]
     {
-        // On Unix, spawn detached so closing the launcher won't kill the game
         cmd.stdin(Stdio::null());
     }
 
@@ -136,13 +177,5 @@ fn collect_jars(dir: &Path, jars: &mut Vec<PathBuf>) {
                 jars.push(path);
             }
         }
-    }
-}
-
-fn ensure_default_server_in_game_dir(game_dir: &Path) {
-    let servers_dat = game_dir.join("servers.dat");
-    if !servers_dat.exists() {
-        // If servers.dat does not exist yet, we can create or copy from template
-        // Note: FancyMenu or modpack zip normally bundles this.
     }
 }

@@ -597,3 +597,38 @@ fn extract_modpack_safely(zip_path: &Path, game_dir: &Path) -> Result<(), String
     }
     Ok(())
 }
+
+pub async fn ensure_assets(game_dir: &Path) -> Result<PathBuf, String> {
+    let assets_dir = game_dir.join("assets");
+    let indexes_dir = assets_dir.join("indexes");
+    let index_file = indexes_dir.join("5.json");
+
+    let _ = fs::create_dir_all(&indexes_dir);
+
+    // If local Modrinth meta assets exist, symlink them so the client has full assets immediately
+    let modrinth_assets = PathBuf::from("/home/varixxl/.local/share/ModrinthApp/meta/assets");
+    let objects_dir = assets_dir.join("objects");
+    if !objects_dir.exists() && modrinth_assets.join("objects").exists() {
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(modrinth_assets.join("objects"), &objects_dir);
+    }
+
+    if !index_file.exists() {
+        if modrinth_assets.join("indexes/5.json").exists() {
+            let _ = fs::copy(modrinth_assets.join("indexes/5.json"), &index_file);
+        } else {
+            let client = Client::new();
+            if let Ok(res) = client
+                .get("https://piston-meta.mojang.com/v1/packages/3d1e8e9cad62f188270564f4bdfd3a79df9be65a/5.json")
+                .send()
+                .await
+            {
+                if let Ok(bytes) = res.bytes().await {
+                    let _ = fs::write(&index_file, bytes);
+                }
+            }
+        }
+    }
+
+    Ok(assets_dir)
+}
