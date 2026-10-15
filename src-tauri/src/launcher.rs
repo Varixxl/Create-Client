@@ -4,6 +4,14 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter};
+
+static IS_MINECRAFT_RUNNING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_minecraft_running() -> bool {
+    IS_MINECRAFT_RUNNING.load(Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct VersionMeta {
@@ -104,6 +112,7 @@ fn maven_to_path(name: &str) -> Option<String> {
 }
 
 pub fn launch_minecraft(
+    app: &AppHandle,
     java_bin: &Path,
     game_dir: &Path,
     profile: &MinecraftProfile,
@@ -298,11 +307,22 @@ pub fn launch_minecraft(
         }
     }
 
-    let child = cmd
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn Minecraft process: {}", e))?;
 
-    Ok(child.id())
+    let pid = child.id();
+    IS_MINECRAFT_RUNNING.store(true, Ordering::SeqCst);
+    let app_handle = app.clone();
+
+    std::thread::spawn(move || {
+        let _ = app_handle.emit("game-status", true);
+        let _ = child.wait();
+        IS_MINECRAFT_RUNNING.store(false, Ordering::SeqCst);
+        let _ = app_handle.emit("game-status", false);
+    });
+
+    Ok(pid)
 }
 
 fn collect_jars(dir: &Path, jars: &mut Vec<PathBuf>) {

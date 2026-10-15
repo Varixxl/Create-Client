@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings, LogIn, LogOut, Cog } from "lucide-react";
+import { Settings, LogIn, LogOut, Cog, Sparkles } from "lucide-react";
 import { MinecraftProfile } from "../types";
 
 interface HeaderProps {
@@ -8,6 +8,8 @@ interface HeaderProps {
   onLogin: () => void;
   onLogout: () => void;
   isLoggingIn: boolean;
+  onCheckUpdate: () => void;
+  isCheckingUpdate: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,6 +18,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogin,
   onLogout,
   isLoggingIn,
+  onCheckUpdate,
+  isCheckingUpdate,
 }) => {
   return (
     <header className="h-16 px-6 bg-[#182232]/95 border-b border-[#2a384c] flex items-center justify-between backdrop-blur-md z-20 shadow-md">
@@ -75,6 +79,17 @@ export const Header: React.FC<HeaderProps> = ({
             <span>{isLoggingIn ? "Check Your Browser..." : "Sign In with Microsoft"}</span>
           </button>
         )}
+
+        {/* Update Client button */}
+        <button
+          onClick={onCheckUpdate}
+          disabled={isCheckingUpdate}
+          title="Check for Client Updates"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0e121a] border border-[#2a384c] text-[#8fa0bc] hover:text-[#12c3ca] hover:border-[#12c3ca]/60 transition-all cursor-pointer shadow-sm hover:shadow-cyan-950/30 text-xs font-bold disabled:opacity-60"
+        >
+          <Sparkles className={`w-3.5 h-3.5 text-[#12c3ca] ${isCheckingUpdate ? "animate-spin" : ""}`} />
+          <span className="hidden md:inline">Update Client</span>
+        </button>
 
         {/* Settings button */}
         <button

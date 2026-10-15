@@ -3,6 +3,7 @@ pub mod config;
 pub mod downloader;
 pub mod launcher;
 pub mod pinger;
+pub mod updater;
 
 use auth::AuthStatus;
 use config::AppConfig;
@@ -106,12 +107,29 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
 
     // Launch Forge process
-    launcher::launch_minecraft(&java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)
+    launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)
+}
+
+#[tauri::command]
+fn get_game_status() -> bool {
+    launcher::is_minecraft_running()
 }
 
 #[tauri::command]
 async fn get_update_log() -> Result<String, String> {
-    // 1. Check local create-modpack FancyMenu updatelog
+    let cfg = config::load_config();
+
+    // 1. Check active game_dir FancyMenu updatelog (updated after sync)
+    let game_log = PathBuf::from(&cfg.game_dir).join("config/fancymenu/customization/updatelog_layout.txt");
+    if game_log.exists() {
+        if let Ok(content) = std::fs::read_to_string(&game_log) {
+            if let Some(text) = extract_fancymenu_text(&content) {
+                return Ok(text);
+            }
+        }
+    }
+
+    // 2. Check local create-modpack FancyMenu updatelog
     let local_path = PathBuf::from("/home/varixxl/create-modpack/config/fancymenu/customization/updatelog_layout.txt");
     if local_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&local_path) {
@@ -121,7 +139,7 @@ async fn get_update_log() -> Result<String, String> {
         }
     }
 
-    // 2. Fallback: fetch from GitHub raw
+    // 3. Fallback: fetch from GitHub raw
     let client = reqwest::Client::new();
     let url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/config/fancymenu/customization/updatelog_layout.txt";
     if let Ok(res) = client.get(url).send().await {
@@ -138,15 +156,20 @@ async fn get_update_log() -> Result<String, String> {
 }
 
 fn extract_fancymenu_text(layout: &str) -> Option<String> {
+    let mut best_text: Option<String> = None;
+    let mut max_len = 0;
+
     for line in layout.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("source = ") {
-            let raw = &trimmed["source = ".len()..];
-            let clean = raw.replace("%n%", "\n");
-            return Some(clean);
+        if let Some(raw) = trimmed.strip_prefix("source = ") {
+            if raw.len() > max_len {
+                max_len = raw.len();
+                let clean = raw.replace("%n%", "\n");
+                best_text = Some(clean);
+            }
         }
     }
-    None
+    best_text
 }
 
 #[tauri::command]
@@ -156,6 +179,21 @@ fn open_folder(path: String) -> Result<(), String> {
         let _ = std::fs::create_dir_all(p);
     }
     open::that(p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    open::that(url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_client_update() -> Result<updater::ClientUpdateInfo, String> {
+    updater::check_for_update().await
+}
+
+#[tauri::command]
+async fn perform_client_update(app: AppHandle, download_url: String) -> Result<String, String> {
+    updater::perform_update(&app, &download_url).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -172,8 +210,12 @@ pub fn run() {
             get_server_status,
             sync_modpack,
             launch_game,
+            get_game_status,
             get_update_log,
-            open_folder
+            open_folder,
+            open_url,
+            check_client_update,
+            perform_client_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
