@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Header } from "./components/Header";
 import { ServerCard } from "./components/ServerCard";
 import { SettingsModal } from "./components/SettingsModal";
 import { ChangelogDrawer } from "./components/ChangelogDrawer";
+import { LoginModal } from "./components/LoginModal";
 import { Play, Flame, AlertCircle, FileText, CheckCircle2 } from "lucide-react";
 import {
   AppConfig,
@@ -12,6 +13,7 @@ import {
   MinecraftProfile,
   ProgressPayload,
   ServerStatus,
+  DeviceCodeInfo,
 } from "./types";
 
 export const App: React.FC = () => {
@@ -21,6 +23,10 @@ export const App: React.FC = () => {
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [deviceInfo, setDeviceInfo] = useState<DeviceCodeInfo | null>(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const pollingRef = useRef<number | null>(null);
+
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
   const [isRefreshingServer, setIsRefreshingServer] = useState(false);
@@ -78,13 +84,40 @@ export const App: React.FC = () => {
     setErrorMsg(null);
     setIsLoggingIn(true);
     try {
-      const newProfile = await invoke<MinecraftProfile>("login", { clientId: null });
-      setProfile(newProfile);
+      const info = await invoke<DeviceCodeInfo>("start_device_login");
+      setDeviceInfo(info);
+      setIsLoginModalOpen(true);
+      startPolling(info.device_code, info.interval || 5);
     } catch (err: any) {
       setErrorMsg(typeof err === "string" ? err : JSON.stringify(err));
     } finally {
       setIsLoggingIn(false);
     }
+  };
+
+  const startPolling = (deviceCode: string, intervalSec: number) => {
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(async () => {
+      try {
+        const newProfile = await invoke<MinecraftProfile | null>("poll_device_login", { deviceCode });
+        if (newProfile) {
+          setProfile(newProfile);
+          setIsLoginModalOpen(false);
+          setDeviceInfo(null);
+          if (pollingRef.current) clearInterval(pollingRef.current);
+        }
+      } catch (err: any) {
+        setErrorMsg(typeof err === "string" ? err : JSON.stringify(err));
+        setIsLoginModalOpen(false);
+        if (pollingRef.current) clearInterval(pollingRef.current);
+      }
+    }, Math.max(3000, intervalSec * 1000));
+  };
+
+  const handleCloseLoginModal = () => {
+    setIsLoginModalOpen(false);
+    setDeviceInfo(null);
+    if (pollingRef.current) clearInterval(pollingRef.current);
   };
 
   const handleLogout = async () => {
@@ -327,6 +360,13 @@ export const App: React.FC = () => {
         isOpen={isChangelogOpen}
         onClose={() => setIsChangelogOpen(false)}
         version="v1.2.6"
+      />
+
+      {/* Device Code Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={handleCloseLoginModal}
+        deviceInfo={deviceInfo}
       />
     </div>
   );

@@ -1,16 +1,9 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use rand::RngCore;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 
-const REDIRECT_PORT: u16 = 8483;
-const REDIRECT_URI: &str = "http://localhost:8483/callback";
+pub const ALLOWLISTED_CLIENT_ID: &str = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinecraftProfile {
@@ -28,22 +21,13 @@ pub struct AuthStatus {
     pub profile: Option<MinecraftProfile>,
 }
 
-pub struct PkceChallenge {
-    pub verifier: String,
-    pub challenge: String,
-}
-
-pub fn generate_pkce() -> PkceChallenge {
-    let mut bytes = [0u8; 64];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    let verifier = URL_SAFE_NO_PAD.encode(bytes);
-
-    let mut hasher = Sha256::new();
-    hasher.update(verifier.as_bytes());
-    let hash = hasher.finalize();
-    let challenge = URL_SAFE_NO_PAD.encode(hash);
-
-    PkceChallenge { verifier, challenge }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceCodeInfo {
+    pub user_code: String,
+    pub device_code: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
 }
 
 fn get_auth_file_path() -> std::path::PathBuf {
@@ -77,15 +61,143 @@ pub fn clear_profile() -> Result<(), String> {
     Ok(())
 }
 
-// ---------------- Microsoft OAuth & Minecraft Services ----------------
+// ---------------- Device Code Flow ----------------
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
-struct MsTokenResponse {
-    access_token: String,
-    refresh_token: String,
+struct DeviceCodeResponse {
+    user_code: String,
+    device_code: String,
+    verification_uri: String,
     expires_in: u64,
+    interval: Option<u64>,
 }
+
+pub async fn start_device_flow() -> Result<DeviceCodeInfo, String> {
+    let http = Client::new();
+
+    let params = [
+        ("client_id", ALLOWLISTED_CLIENT_ID),
+        ("scope", "XboxLive.signin offline_access"),
+    ];
+
+    let res = http
+        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to initiate device code request: {}", e))?;
+
+    if !res.status().is_success() {
+        let err_text = res.text().await.unwrap_or_default();
+        return Err(format!("Device code request failed: {}", err_text));
+    }
+
+    let data: DeviceCodeResponse = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse device code JSON: {}", e))?;
+
+    // Open browser to verification link
+    let _ = open::that(&data.verification_uri);
+
+    Ok(DeviceCodeInfo {
+        user_code: data.user_code,
+        device_code: data.device_code,
+        verification_uri: data.verification_uri,
+        expires_in: data.expires_in,
+        interval: data.interval.unwrap_or(5),
+    })
+}
+
+#[derive(Deserialize)]
+struct DeviceTokenResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    error: Option<String>,
+}
+
+pub async fn poll_device_flow(device_code: &str) -> Result<Option<MinecraftProfile>, String> {
+    let http = Client::new();
+
+    let params = [
+        ("client_id", ALLOWLISTED_CLIENT_ID),
+        ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ("device_code", device_code),
+    ];
+
+    let res = http
+        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e| format!("Token poll failed: {}", e))?;
+
+    let token_data: DeviceTokenResponse = res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+
+    if let Some(err) = token_data.error {
+        if err == "authorization_pending" || err == "slow_down" {
+            return Ok(None); // Still waiting for player to click approve
+        }
+        return Err(format!("Authorization error: {}", err));
+    }
+
+    if let (Some(ms_access), Some(ms_refresh)) = (token_data.access_token, token_data.refresh_token) {
+        // Player approved! Complete Xbox Live & Minecraft Services chain
+        let profile = authenticate_with_ms_token(ALLOWLISTED_CLIENT_ID, &ms_access, &ms_refresh).await?;
+        return Ok(Some(profile));
+    }
+
+    Ok(None)
+}
+
+// ---------------- Background Token Refresh ----------------
+
+pub async fn refresh_saved_session(client_id: &str, refresh_token: &str) -> Result<MinecraftProfile, String> {
+    let http = Client::new();
+
+    let cid = if client_id.trim().is_empty() {
+        ALLOWLISTED_CLIENT_ID
+    } else {
+        client_id
+    };
+
+    let token_params = [
+        ("client_id", cid),
+        ("scope", "XboxLive.signin offline_access"),
+        ("refresh_token", refresh_token),
+        ("grant_type", "refresh_token"),
+    ];
+
+    let ms_res = http
+        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
+        .form(&token_params)
+        .send()
+        .await
+        .map_err(|e| format!("Microsoft refresh request failed: {}", e))?;
+
+    if !ms_res.status().is_success() {
+        let err_text = ms_res.text().await.unwrap_or_default();
+        return Err(format!("Microsoft refresh error: {}", err_text));
+    }
+
+    #[derive(Deserialize)]
+    struct MsRefreshResponse {
+        access_token: String,
+        refresh_token: String,
+    }
+
+    let ms_tokens: MsRefreshResponse = ms_res
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse refreshed token JSON: {}", e))?;
+
+    authenticate_with_ms_token(cid, &ms_tokens.access_token, &ms_tokens.refresh_token).await
+}
+
+// ---------------- Xbox Live, XSTS & Minecraft Services ----------------
 
 #[derive(Deserialize)]
 struct XblResponse {
@@ -124,172 +236,6 @@ struct MinecraftSkinItem {
     state: Option<String>,
 }
 
-pub async fn start_login_flow(client_id: String) -> Result<MinecraftProfile, String> {
-    if client_id.trim().is_empty() {
-        return Err("Azure Client ID is required. Please set it in Settings.".to_string());
-    }
-
-    let pkce = generate_pkce();
-    let auth_url = format!(
-        "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?\
-        client_id={}&\
-        response_type=code&\
-        redirect_uri={}&\
-        scope=XboxLive.signin%20offline_access&\
-        code_challenge={}&\
-        code_challenge_method=S256",
-        url::form_urlencoded::byte_serialize(client_id.as_bytes()).collect::<String>(),
-        url::form_urlencoded::byte_serialize(REDIRECT_URI.as_bytes()).collect::<String>(),
-        pkce.challenge
-    );
-
-    // Bind local TCP listener
-    let listener = TcpListener::bind(format!("127.0.0.1:{}", REDIRECT_PORT))
-        .await
-        .map_err(|e| format!("Failed to bind local auth listener on port {}: {}", REDIRECT_PORT, e))?;
-
-    // Open browser for the player
-    let _ = open::that(&auth_url);
-
-    // Wait for the redirect callback
-    let code = match wait_for_code(listener).await {
-        Ok(c) => c,
-        Err(e) => return Err(format!("OAuth callback error: {}", e)),
-    };
-
-    // Complete token exchange chain
-    complete_auth_chain(&client_id, &code, &pkce.verifier).await
-}
-
-async fn wait_for_code(listener: TcpListener) -> Result<String, String> {
-    // Wait for incoming HTTP request
-    let (mut socket, _) = listener
-        .accept()
-        .await
-        .map_err(|e| format!("Failed to accept incoming connection: {}", e))?;
-
-    let mut buf = [0u8; 2048];
-    let bytes_read = socket
-        .read(&mut buf)
-        .await
-        .map_err(|e| format!("Failed to read request from browser: {}", e))?;
-
-    let req = String::from_utf8_lossy(&buf[..bytes_read]);
-
-    let mut code = None;
-    if let Some(first_line) = req.lines().next() {
-        // e.g. "GET /callback?code=M.R3_BLA... HTTP/1.1"
-        if let Some(path) = first_line.split_whitespace().nth(1) {
-            if let Ok(url) = url::Url::parse(&format!("http://localhost{}", path)) {
-                for (k, v) in url.query_pairs() {
-                    if k == "code" {
-                        code = Some(v.to_string());
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // Send HTTP response to browser
-    let response_body = r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Create Client - Login Successful</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #121417; color: #e1e7ec; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .card { background: #1a1e24; border: 1px solid #2e3846; border-radius: 12px; padding: 32px 40px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 400px; }
-        h1 { color: #e6a23c; margin: 0 0 12px 0; font-size: 24px; }
-        p { color: #9aa7b4; line-height: 1.5; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Login Successful!</h1>
-        <p>You have signed in to Create Client. You may now safely close this browser window and return to the game launcher.</p>
-    </div>
-</body>
-</html>"#;
-
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        response_body.len(),
-        response_body
-    );
-
-    let _ = socket.write_all(response.as_bytes()).await;
-    let _ = socket.flush().await;
-
-    code.ok_or_else(|| "No authorization code found in callback query".to_string())
-}
-
-async fn complete_auth_chain(
-    client_id: &str,
-    code: &str,
-    code_verifier: &str,
-) -> Result<MinecraftProfile, String> {
-    let http = Client::new();
-
-    // 1. Exchange Microsoft Auth Code for Microsoft Tokens
-    let token_params = [
-        ("client_id", client_id),
-        ("scope", "XboxLive.signin offline_access"),
-        ("code", code),
-        ("redirect_uri", REDIRECT_URI),
-        ("grant_type", "authorization_code"),
-        ("code_verifier", code_verifier),
-    ];
-
-    let ms_res = http
-        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
-        .form(&token_params)
-        .send()
-        .await
-        .map_err(|e| format!("Microsoft token request failed: {}", e))?;
-
-    if !ms_res.status().is_success() {
-        let err_text = ms_res.text().await.unwrap_or_default();
-        return Err(format!("Microsoft token exchange error: {}", err_text));
-    }
-
-    let ms_tokens: MsTokenResponse = ms_res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Microsoft token JSON: {}", e))?;
-
-    authenticate_with_ms_token(client_id, &ms_tokens.access_token, &ms_tokens.refresh_token).await
-}
-
-pub async fn refresh_saved_session(client_id: &str, refresh_token: &str) -> Result<MinecraftProfile, String> {
-    let http = Client::new();
-
-    let token_params = [
-        ("client_id", client_id),
-        ("scope", "XboxLive.signin offline_access"),
-        ("refresh_token", refresh_token),
-        ("grant_type", "refresh_token"),
-    ];
-
-    let ms_res = http
-        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
-        .form(&token_params)
-        .send()
-        .await
-        .map_err(|e| format!("Microsoft refresh request failed: {}", e))?;
-
-    if !ms_res.status().is_success() {
-        let err_text = ms_res.text().await.unwrap_or_default();
-        return Err(format!("Microsoft refresh error: {}", err_text));
-    }
-
-    let ms_tokens: MsTokenResponse = ms_res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse refreshed token JSON: {}", e))?;
-
-    authenticate_with_ms_token(client_id, &ms_tokens.access_token, &ms_tokens.refresh_token).await
-}
-
 async fn authenticate_with_ms_token(
     _client_id: &str,
     ms_access_token: &str,
@@ -297,7 +243,7 @@ async fn authenticate_with_ms_token(
 ) -> Result<MinecraftProfile, String> {
     let http = Client::new();
 
-    // 2. Authenticate with Xbox Live (user.auth.xboxlive.com)
+    // 1. Authenticate with Xbox Live (user.auth.xboxlive.com)
     let xbl_payload = serde_json::json!({
         "Properties": {
             "AuthMethod": "RPS",
@@ -335,7 +281,7 @@ async fn authenticate_with_ms_token(
         .uhs
         .clone();
 
-    // 3. Obtain XSTS Token for Minecraft
+    // 2. Obtain XSTS Token for Minecraft
     let xsts_payload = serde_json::json!({
         "Properties": {
             "SandboxId": "RETAIL",
@@ -364,7 +310,7 @@ async fn authenticate_with_ms_token(
         .await
         .map_err(|e| format!("Failed to parse XSTS response: {}", e))?;
 
-    // 4. Authenticate with Minecraft Services
+    // 3. Authenticate with Minecraft Services
     let mc_login_payload = serde_json::json!({
         "identityToken": format!("XBL3.0 x={};{}", uhs, xsts_data.token)
     });
@@ -388,7 +334,7 @@ async fn authenticate_with_ms_token(
         .await
         .map_err(|e| format!("Failed to parse Minecraft login response: {}", e))?;
 
-    // 5. Get Minecraft Profile
+    // 4. Get Minecraft Profile
     let profile_res = http
         .get("https://api.minecraftservices.com/minecraft/profile")
         .bearer_auth(&mc_login.access_token)

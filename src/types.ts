@@ -38,3 +38,11 @@ export interface ProgressPayload {
   percentage: number;
   speed_bytes_sec: number;
 }
+
+export interface DeviceCodeInfo {
+  user_code: string;
+  device_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}

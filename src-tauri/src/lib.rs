@@ -4,7 +4,7 @@ pub mod downloader;
 pub mod launcher;
 pub mod pinger;
 
-use auth::{AuthStatus, MinecraftProfile};
+use auth::AuthStatus;
 use config::AppConfig;
 use pinger::ServerStatus;
 use std::path::{Path, PathBuf};
@@ -54,24 +54,13 @@ async fn get_auth_status() -> AuthStatus {
 }
 
 #[tauri::command]
-async fn login(client_id: Option<String>) -> Result<MinecraftProfile, String> {
-    let mut cfg = config::load_config();
-    let cid = match client_id {
-        Some(c) if !c.trim().is_empty() => {
-            cfg.azure_client_id = c.trim().to_string();
-            let _ = config::save_config(&cfg);
-            cfg.azure_client_id
-        }
-        _ => {
-            if cfg.azure_client_id.trim().is_empty() {
-                config::DEFAULT_AZURE_CLIENT_ID.to_string()
-            } else {
-                cfg.azure_client_id
-            }
-        }
-    };
+async fn start_device_login() -> Result<auth::DeviceCodeInfo, String> {
+    auth::start_device_flow().await
+}
 
-    auth::start_login_flow(cid).await
+#[tauri::command]
+async fn poll_device_login(device_code: String) -> Result<Option<auth::MinecraftProfile>, String> {
+    auth::poll_device_flow(&device_code).await
 }
 
 #[tauri::command]
@@ -134,7 +123,8 @@ pub fn run() {
             get_config,
             save_config,
             get_auth_status,
-            login,
+            start_device_login,
+            poll_device_login,
             logout,
             get_server_status,
             sync_modpack,
