@@ -295,7 +295,9 @@ pub fn launch_minecraft(
 
     #[cfg(unix)]
     {
+        use std::os::unix::process::CommandExt;
         cmd.stdin(Stdio::null());
+        cmd.process_group(0);
     }
 
     // Redirect stdout and stderr to launcher_log.txt in game directory for easy debugging

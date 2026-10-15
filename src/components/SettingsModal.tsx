@@ -11,8 +11,7 @@ interface SettingsModalProps {
   onForceRepair: () => void;
 }
 
-const DEFAULT_JVM_FLAGS =
-  "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch";
+const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+AlwaysPreTouch";
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -112,7 +111,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               value={jvmFlags}
               onChange={(e) => setJvmFlags(e.target.value)}
               className="w-full bg-[#1c2432] border border-[#263042] focus:border-[#12c3ca] rounded-lg p-2.5 text-xs font-mono text-[#e4e8ee] focus:outline-none transition-colors resize-none"
-              placeholder="-XX:+UseG1GC..."
+              placeholder="-XX:+UseZGC -XX:+AlwaysPreTouch"
             />
           </div>
 

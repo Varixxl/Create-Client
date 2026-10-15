@@ -13,13 +13,14 @@ pub struct AppConfig {
 }
 
 pub const DEFAULT_AZURE_CLIENT_ID: &str = "43e4ff18-9c63-455f-9224-a124a6b71086";
+pub const DEFAULT_JVM_FLAGS: &str = "-XX:+UseZGC -XX:+AlwaysPreTouch";
 
 impl Default for AppConfig {
     fn default() -> Self {
         let default_game_dir = get_default_game_dir().to_string_lossy().to_string();
         Self {
             ram_gb: 8,
-            jvm_flags: "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch".to_string(),
+            jvm_flags: DEFAULT_JVM_FLAGS.to_string(),
             game_dir: default_game_dir,
             azure_client_id: DEFAULT_AZURE_CLIENT_ID.to_string(),
             auto_connect: false,
@@ -65,6 +66,11 @@ pub fn load_config() -> AppConfig {
                     || config.release_manifest_url.trim().is_empty()
                 {
                     config.release_manifest_url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string();
+                    changed = true;
+                }
+                // Automatic migration: switch old G1GC defaults to ZGC
+                if config.jvm_flags.contains("UseG1GC") {
+                    config.jvm_flags = DEFAULT_JVM_FLAGS.to_string();
                     changed = true;
                 }
                 if changed {
