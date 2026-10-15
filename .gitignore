@@ -24,3 +24,6 @@ dist-modpack
 *.njsproj
 *.sln
 *.sw?
+
+# Avoid workflow scope requirement with basic PAT
+.github/

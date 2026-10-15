@@ -17,9 +17,32 @@ pub struct ProgressPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModpackManifest {
+pub struct BasePackage {
     pub version: String,
-    pub modpack_url: String,
+    pub url: String,
+    pub sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeltaPatch {
+    pub from_version: String,
+    pub to_version: String,
+    pub url: String,
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub delete_files: Vec<String>,
+    pub changelog: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModpackManifest {
+    #[serde(alias = "version")]
+    pub latest_version: String,
+    #[serde(default)]
+    pub base_package: Option<BasePackage>,
+    #[serde(default)]
+    pub patches: Vec<DeltaPatch>,
+    pub modpack_url: Option<String>,
     pub sha256: Option<String>,
     pub changelog: Option<String>,
 }
@@ -196,7 +219,7 @@ pub async fn check_and_sync_modpack(
     fs::create_dir_all(game_dir).map_err(|e| format!("Failed to create game directory: {}", e))?;
 
     let version_file = game_dir.join("client_version.json");
-    let local_version: Option<String> = if version_file.exists() && !force_repair {
+    let mut current_version: Option<String> = if version_file.exists() && !force_repair {
         fs::read_to_string(&version_file)
             .ok()
             .and_then(|c| serde_json::from_str::<InstalledVersion>(&c).ok())
@@ -214,9 +237,9 @@ pub async fn check_and_sync_modpack(
         .map_err(|e| format!("Failed to check modpack manifest: {}", e))?;
 
     if !res.status().is_success() {
-        if local_version.is_some() {
+        if let Some(ver) = current_version {
             // If offline or manifest fails, proceed with existing local version
-            return Ok(local_version.unwrap());
+            return Ok(ver);
         }
         return Err(format!("Could not fetch modpack manifest (HTTP {})", res.status()));
     }
@@ -226,40 +249,127 @@ pub async fn check_and_sync_modpack(
         .await
         .map_err(|e| format!("Failed to parse modpack manifest: {}", e))?;
 
-    if Some(&manifest.version) == local_version.as_ref() && !force_repair {
-        return Ok(manifest.version);
+    if Some(&manifest.latest_version) == current_version.as_ref() && !force_repair {
+        return Ok(manifest.latest_version);
     }
 
-    // Need update or repair
-    let temp_zip = game_dir.join("modpack_update.zip");
-    download_file_with_progress(app, &manifest.modpack_url, &temp_zip, "Downloading Modpack Update").await?;
+    // Determine base package info (fallback to modpack_url if base_package not specified)
+    let base_pkg = manifest.base_package.clone().unwrap_or_else(|| BasePackage {
+        version: manifest.latest_version.clone(),
+        url: manifest.modpack_url.clone().unwrap_or_default(),
+        sha256: manifest.sha256.clone(),
+    });
 
-    let _ = app.emit(
-        "download-progress",
-        ProgressPayload {
-            task: "Extracting Modpack Files...".to_string(),
-            current_bytes: 100,
-            total_bytes: 100,
-            percentage: 95.0,
-            speed_bytes_sec: 0,
-        },
-    );
+    // Step 1: Base installation if no installation exists or force_repair requested
+    if current_version.is_none() || force_repair {
+        if base_pkg.url.is_empty() {
+            return Err("No base package URL found in manifest".to_string());
+        }
 
-    extract_modpack_safely(&temp_zip, game_dir)?;
-    let _ = fs::remove_file(&temp_zip);
+        let temp_zip = game_dir.join("base_modpack.zip");
+        download_file_with_progress(
+            app,
+            &base_pkg.url,
+            &temp_zip,
+            &format!("Downloading Base Modpack v{}...", base_pkg.version),
+        )
+        .await?;
 
-    // Save installed version
-    let installed = InstalledVersion {
-        version: manifest.version.clone(),
-        installed_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-    };
-    let _ = fs::write(
-        &version_file,
-        serde_json::to_string_pretty(&installed).unwrap_or_default(),
-    );
+        let _ = app.emit(
+            "download-progress",
+            ProgressPayload {
+                task: "Extracting Base Modpack...".to_string(),
+                current_bytes: 100,
+                total_bytes: 100,
+                percentage: 95.0,
+                speed_bytes_sec: 0,
+            },
+        );
+
+        extract_modpack_safely(&temp_zip, game_dir)?;
+        let _ = fs::remove_file(&temp_zip);
+
+        current_version = Some(base_pkg.version.clone());
+        save_installed_version(&version_file, &base_pkg.version)?;
+    }
+
+    // Step 2: Apply sequential delta patches if current version is behind latest
+    let mut installed_ver = current_version.unwrap();
+    if installed_ver != manifest.latest_version {
+        let maybe_chain = find_patch_chain(&manifest.patches, &installed_ver, &manifest.latest_version);
+
+        match maybe_chain {
+            Some(chain) => {
+                for patch in chain {
+                    let task_label = format!("Downloading Update (v{} -> v{})...", patch.from_version, patch.to_version);
+                    let temp_zip = game_dir.join(format!("patch_v{}.zip", patch.to_version));
+
+                    download_file_with_progress(app, &patch.url, &temp_zip, &task_label).await?;
+
+                    // Delete files specified in patch removal list
+                    for del_rel in &patch.delete_files {
+                        delete_file_safely(game_dir, del_rel);
+                    }
+
+                    let _ = app.emit(
+                        "download-progress",
+                        ProgressPayload {
+                            task: format!("Applying Patch v{}...", patch.to_version),
+                            current_bytes: 100,
+                            total_bytes: 100,
+                            percentage: 95.0,
+                            speed_bytes_sec: 0,
+                        },
+                    );
+
+                    extract_modpack_safely(&temp_zip, game_dir)?;
+                    let _ = fs::remove_file(&temp_zip);
+
+                    installed_ver = patch.to_version.clone();
+                    save_installed_version(&version_file, &installed_ver)?;
+                }
+            }
+            None => {
+                // If direct patch chain cannot be constructed, fall back to base package
+                if !base_pkg.url.is_empty() {
+                    let temp_zip = game_dir.join("base_modpack.zip");
+                    download_file_with_progress(
+                        app,
+                        &base_pkg.url,
+                        &temp_zip,
+                        &format!("Re-syncing Base Modpack v{}...", base_pkg.version),
+                    )
+                    .await?;
+
+                    extract_modpack_safely(&temp_zip, game_dir)?;
+                    let _ = fs::remove_file(&temp_zip);
+
+                    installed_ver = base_pkg.version.clone();
+                    save_installed_version(&version_file, &installed_ver)?;
+
+                    // Check if additional patches exist from base to latest
+                    if let Some(sub_chain) = find_patch_chain(&manifest.patches, &installed_ver, &manifest.latest_version) {
+                        for patch in sub_chain {
+                            let task_label = format!("Downloading Update (v{} -> v{})...", patch.from_version, patch.to_version);
+                            let temp_zip = game_dir.join(format!("patch_v{}.zip", patch.to_version));
+
+                            download_file_with_progress(app, &patch.url, &temp_zip, &task_label).await?;
+
+                            for del_rel in &patch.delete_files {
+                                delete_file_safely(game_dir, del_rel);
+                            }
+
+                            extract_modpack_safely(&temp_zip, game_dir)?;
+                            let _ = fs::remove_file(&temp_zip);
+
+                            installed_ver = patch.to_version.clone();
+                            save_installed_version(&version_file, &installed_ver)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let _ = app.emit(
         "download-progress",
@@ -272,7 +382,78 @@ pub async fn check_and_sync_modpack(
         },
     );
 
-    Ok(manifest.version)
+    Ok(installed_ver)
+}
+
+fn save_installed_version(version_file: &Path, version: &str) -> Result<(), String> {
+    let installed = InstalledVersion {
+        version: version.to_string(),
+        installed_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    };
+    let data = serde_json::to_string_pretty(&installed).map_err(|e| e.to_string())?;
+    fs::write(version_file, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn find_patch_chain<'a>(
+    patches: &'a [DeltaPatch],
+    start_version: &str,
+    target_version: &str,
+) -> Option<Vec<&'a DeltaPatch>> {
+    let mut chain = Vec::new();
+    let mut current = start_version.to_string();
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(current.clone());
+
+    while current != target_version {
+        if let Some(next_patch) = patches.iter().find(|p| p.from_version == current) {
+            if !visited.insert(next_patch.to_version.clone()) {
+                // Cycle detected, abort chain
+                return None;
+            }
+            current = next_patch.to_version.clone();
+            chain.push(next_patch);
+        } else {
+            return None; // Broken chain
+        }
+    }
+
+    Some(chain)
+}
+
+fn delete_file_safely(game_dir: &Path, rel_path: &str) {
+    let normalized = rel_path.trim_start_matches('/').trim_start_matches('\\');
+    if normalized.is_empty() || normalized.contains("..") {
+        return;
+    }
+
+    let protected_files = [
+        "options.txt",
+        "optionsof.txt",
+        "servers.dat",
+        "client_version.json",
+    ];
+    let protected_prefixes = [
+        "screenshots/",
+        "saves/",
+        "logs/",
+    ];
+
+    if protected_files.iter().any(|&pf| normalized == pf)
+        || protected_prefixes.iter().any(|&pp| normalized.starts_with(pp))
+    {
+        return;
+    }
+
+    let target = game_dir.join(normalized);
+    if target.is_file() || target.is_symlink() {
+        let _ = fs::remove_file(&target);
+    } else if target.is_dir() {
+        let _ = fs::remove_dir_all(&target);
+    }
 }
 
 async fn download_file_with_progress(
@@ -381,12 +562,11 @@ fn extract_modpack_safely(zip_path: &Path, game_dir: &Path) -> Result<(), String
         "options.txt",
         "optionsof.txt",
         "servers.dat",
+        "client_version.json",
     ];
     let protected_prefixes = [
         "screenshots/",
         "saves/",
-        "resourcepacks/",
-        "shaderpacks/",
         "logs/",
     ];
 

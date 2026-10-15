@@ -23,7 +23,7 @@ impl Default for AppConfig {
             game_dir: default_game_dir,
             azure_client_id: DEFAULT_AZURE_CLIENT_ID.to_string(),
             auto_connect: false,
-            release_manifest_url: "https://raw.githubusercontent.com/JaviDaBomb/Create-Client/main/manifest.json".to_string(),
+            release_manifest_url: "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string(),
         }
     }
 }
@@ -55,8 +55,16 @@ pub fn load_config() -> AppConfig {
     if path.exists() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
+                let mut changed = false;
                 if config.azure_client_id.trim().is_empty() {
                     config.azure_client_id = DEFAULT_AZURE_CLIENT_ID.to_string();
+                    changed = true;
+                }
+                if config.release_manifest_url.contains("Create-Client/main/manifest.json") {
+                    config.release_manifest_url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string();
+                    changed = true;
+                }
+                if changed {
                     let _ = save_config(&config);
                 }
                 return config;
