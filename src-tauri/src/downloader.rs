@@ -73,16 +73,16 @@ pub fn get_runtime_dir() -> PathBuf {
 pub fn get_java_executable(runtime_dir: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        let javaw = runtime_dir.join("java17").join("bin").join("javaw.exe");
+        let javaw = runtime_dir.join("java21").join("bin").join("javaw.exe");
         if javaw.exists() {
             javaw
         } else {
-            runtime_dir.join("java17").join("bin").join("java.exe")
+            runtime_dir.join("java21").join("bin").join("java.exe")
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        runtime_dir.join("java17").join("bin").join("java")
+        runtime_dir.join("java21").join("bin").join("java")
     }
 }
 
@@ -94,23 +94,18 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
 
     fs::create_dir_all(runtime_dir).map_err(|e| format!("Failed to create runtime directory: {}", e))?;
 
-    let os_name = if cfg!(target_os = "windows") {
-        "windows"
+    let download_url = if cfg!(target_os = "windows") {
+        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-win_x64.zip"
     } else if cfg!(target_os = "macos") {
-        "mac"
+        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-macosx_x64.tar.gz"
     } else {
-        "linux"
+        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-linux_x64.tar.gz"
     };
-
-    let api_url = format!(
-        "https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jre&os={}&vendor=eclipse",
-        os_name
-    );
 
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Resolving Java 17 Runtime...".to_string(),
+            task: "Resolving Azul Zulu 21 Runtime...".to_string(),
             current_bytes: 0,
             total_bytes: 100,
             percentage: 0.0,
@@ -118,45 +113,16 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         },
     );
 
-    let client = Client::new();
-    let res = client
-        .get(&api_url)
-        .header("User-Agent", "CreateClient-Launcher")
-        .send()
-        .await
-        .map_err(|e| format!("Failed to fetch Java 17 release info: {}", e))?;
-
-    if !res.status().is_success() {
-        return Err(format!("Adoptium API returned status: {}", res.status()));
-    }
-
-    let assets_json: serde_json::Value = res
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Adoptium response: {}", e))?;
-
-    let binary_pkg = assets_json
-        .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(|item| item.get("binary"))
-        .and_then(|bin| bin.get("package"))
-        .ok_or_else(|| "Could not find Java 17 package download in Adoptium response".to_string())?;
-
-    let download_url = binary_pkg
-        .get("link")
-        .and_then(|l| l.as_str())
-        .ok_or_else(|| "No download link in Adoptium binary package".to_string())?;
-
     let is_zip = download_url.ends_with(".zip");
     let archive_ext = if is_zip { "zip" } else { "tar.gz" };
-    let temp_archive = runtime_dir.join(format!("java17_download.{}", archive_ext));
+    let temp_archive = runtime_dir.join(format!("java21_download.{}", archive_ext));
 
-    download_file_with_progress(app, download_url, &temp_archive, "Downloading Java 17 JRE").await?;
+    download_file_with_progress(app, download_url, &temp_archive, "Downloading Azul Zulu 21 JRE").await?;
 
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Extracting Java 17 JRE...".to_string(),
+            task: "Extracting Azul Zulu 21 JRE...".to_string(),
             current_bytes: 100,
             total_bytes: 100,
             percentage: 99.0,
@@ -164,7 +130,7 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         },
     );
 
-    let temp_extract_dir = runtime_dir.join("java17_extract_temp");
+    let temp_extract_dir = runtime_dir.join("java21_extract_temp");
     let _ = fs::remove_dir_all(&temp_extract_dir);
     fs::create_dir_all(&temp_extract_dir).map_err(|e| e.to_string())?;
 
@@ -176,7 +142,7 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
 
     let _ = fs::remove_file(&temp_archive);
 
-    // Find the inner directory Adoptium created (e.g. `jdk-17.0.x+y-jre`)
+    // Find the inner directory Azul created (e.g. `zulu21.52.203-ca-jre21.0.12.1-...`)
     let mut inner_dir = None;
     for entry in fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -186,13 +152,13 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         }
     }
 
-    let target_java17 = runtime_dir.join("java17");
-    let _ = fs::remove_dir_all(&target_java17);
+    let target_java21 = runtime_dir.join("java21");
+    let _ = fs::remove_dir_all(&target_java21);
 
     if let Some(src) = inner_dir {
-        fs::rename(src, &target_java17).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
+        fs::rename(src, &target_java21).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
     } else {
-        fs::rename(&temp_extract_dir, &target_java17).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
+        fs::rename(&temp_extract_dir, &target_java21).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
     }
     let _ = fs::remove_dir_all(&temp_extract_dir);
 
@@ -213,7 +179,7 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Java 17 ready".to_string(),
+            task: "Azul Zulu 21 Ready".to_string(),
             current_bytes: 100,
             total_bytes: 100,
             percentage: 100.0,

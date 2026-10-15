@@ -294,6 +294,10 @@ pub fn launch_minecraft(
         cmd.arg("--add-opens").arg("java.base/java.lang.invoke=cpw.mods.securejarhandler");
         cmd.arg("--add-exports").arg("java.base/sun.security.util=cpw.mods.securejarhandler");
         cmd.arg("--add-exports").arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
+        cmd.arg("--add-opens").arg("java.base/java.lang.reflect=ALL-UNNAMED");
+        cmd.arg("-XX:+UseZGC");
+        cmd.arg("-XX:+ZGenerational");
+        cmd.arg("-XX:+AlwaysPreTouch");
     }
 
     // Classpath
