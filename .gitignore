@@ -27,3 +27,11 @@ dist-modpack
 
 # Avoid workflow scope requirement with basic PAT
 .github/
+
+# Release archives and binaries
+*.exe
+*.tar.gz
+*.AppImage
+*.deb
+*.rpm
+

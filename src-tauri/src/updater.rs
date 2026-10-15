@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
 use tauri::AppHandle;
 
 pub const CURRENT_VERSION: &str = "1.0.0";
