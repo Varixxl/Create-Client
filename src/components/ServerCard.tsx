@@ -1,5 +1,5 @@
 import React from "react";
-import { Server, Users, Wifi, RotateCw } from "lucide-react";
+import { Users, Wifi, RotateCw } from "lucide-react";
 import { ServerStatus } from "../types";
 
 interface ServerCardProps {
@@ -18,66 +18,68 @@ export const ServerCard: React.FC<ServerCardProps> = ({
   const playersOnline = status?.online_players ?? 0;
   const maxPlayers = status?.max_players ?? 20;
 
-  // Latency color
   const getPingColor = (ms: number) => {
-    if (!isOnline) return "text-slate-500";
-    if (ms < 70) return "text-emerald-400";
-    if (ms < 150) return "text-amber-400";
+    if (!isOnline) return "text-[#8fa0bc]";
+    if (ms < 70) return "text-[#12c3ca]";
+    if (ms < 150) return "text-[#f59e0b]";
     return "text-red-400";
   };
 
   return (
-    <div className="bg-[#141920]/80 border border-[#26303d] rounded-xl p-4 backdrop-blur-md shadow-lg shadow-black/40 min-w-[280px]">
-      <div className="flex items-center justify-between mb-2.5">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
-            <Server className="w-3.5 h-3.5 text-amber-400" />
-          </div>
-          <span className="font-semibold text-sm text-slate-100">
-            {status?.server_name || "Create Server"}
-          </span>
+    <div className="bg-[#0e121af2] border border-[#263042] rounded-xl overflow-hidden shadow-xl backdrop-blur-md min-w-[300px]">
+      {/* FancyMenu Top Bar */}
+      <div className="bg-[#182232] px-3.5 py-2 border-b border-[#263042] flex items-center justify-between">
+        <div className="flex items-center gap-1.5 font-mono text-xs">
+          <span className="font-bold text-[#f59e0b]">SERVER</span>
+          <span className="text-[#3a465a]">|</span>
+          <span className="font-semibold text-[#12c3ca]">Create Server</span>
         </div>
 
-        {/* Refresh button */}
         <button
           onClick={onRefresh}
           disabled={isLoading}
           title="Refresh server status"
-          className="p-1 rounded text-slate-400 hover:text-amber-400 hover:bg-white/5 transition-colors cursor-pointer disabled:opacity-40"
+          className="p-1 rounded text-[#8fa0bc] hover:text-[#12c3ca] hover:bg-white/5 transition-colors cursor-pointer disabled:opacity-40"
         >
-          <RotateCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
+          <RotateCw className={`w-3 h-3 ${isLoading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
-      <div className="flex items-center justify-between text-xs pt-1 border-t border-[#202833]">
-        {/* Status Dot */}
-        <div className="flex items-center gap-2">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              isOnline
-                ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.7)]"
-                : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.7)]"
-            }`}
-          />
-          <span className={isOnline ? "text-emerald-300 font-medium" : "text-red-400 font-medium"}>
-            {isOnline ? "Server Online" : "Server Offline"}
-          </span>
+      {/* Body info */}
+      <div className="p-3.5 space-y-2 text-xs">
+        <div className="flex items-center justify-between">
+          {/* Status Indicator */}
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isOnline
+                  ? "bg-[#12c3ca] shadow-[0_0_8px_rgba(18,195,202,0.8)]"
+                  : "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+              }`}
+            />
+            <span className={isOnline ? "text-[#5ce1e6] font-semibold" : "text-red-400 font-semibold"}>
+              {isOnline ? "Server Online" : "Server Offline"}
+            </span>
+          </div>
+
+          {/* Latency */}
+          <div className="flex items-center gap-1">
+            <Wifi className={`w-3.5 h-3.5 ${getPingColor(ping)}`} />
+            <span className={`font-mono text-[11px] ${getPingColor(ping)}`}>
+              {isOnline ? `${ping}ms` : "--"}
+            </span>
+          </div>
         </div>
 
-        {/* Player Count */}
-        <div className="flex items-center gap-1 text-slate-300">
-          <Users className="w-3.5 h-3.5 text-slate-400" />
-          <span>
-            {playersOnline} / {maxPlayers}
-          </span>
-        </div>
-
-        {/* Ping */}
-        <div className="flex items-center gap-1">
-          <Wifi className={`w-3.5 h-3.5 ${getPingColor(ping)}`} />
-          <span className={`font-mono text-[11px] ${getPingColor(ping)}`}>
-            {isOnline ? `${ping}ms` : "--"}
-          </span>
+        {/* Player stats bar */}
+        <div className="flex items-center justify-between pt-1 border-t border-[#1c2432] text-[#8fa0bc]">
+          <span className="text-[11px]">Online Players:</span>
+          <div className="flex items-center gap-1 text-[#e4e8ee] font-mono font-medium">
+            <Users className="w-3 h-3 text-[#12c3ca]" />
+            <span>
+              {playersOnline} / {maxPlayers}
+            </span>
+          </div>
         </div>
       </div>
     </div>

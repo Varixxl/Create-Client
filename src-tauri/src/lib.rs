@@ -64,9 +64,10 @@ async fn login(client_id: Option<String>) -> Result<MinecraftProfile, String> {
         }
         _ => {
             if cfg.azure_client_id.trim().is_empty() {
-                return Err("Please configure your Azure Client ID in Settings first.".to_string());
+                config::DEFAULT_AZURE_CLIENT_ID.to_string()
+            } else {
+                cfg.azure_client_id
             }
-            cfg.azure_client_id
         }
     };
 
