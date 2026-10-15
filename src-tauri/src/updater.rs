@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-pub const CURRENT_VERSION: &str = "1.0.1";
+pub const CURRENT_VERSION: &str = "1.0.2";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientUpdateInfo {
@@ -121,15 +121,16 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
 
     #[cfg(target_os = "linux")]
     {
+        let target_path = std::env::current_exe().map_err(|e| e.to_string())?;
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let bin_path = PathBuf::from(&home).join(".local/bin/create-client");
-        let target_path = if bin_path.exists() {
+        let actual_target = if bin_path.exists() {
             bin_path
         } else {
-            std::env::current_exe().map_err(|e| e.to_string())?
+            target_path
         };
 
-        let tmp_path = target_path.with_extension("tmp_update");
+        let tmp_path = actual_target.with_extension("tmp_update");
         fs::write(&tmp_path, &bytes).map_err(|e| format!("Failed to write update: {}", e))?;
 
         #[cfg(unix)]
@@ -138,26 +139,57 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
             let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755));
         }
 
-        fs::rename(&tmp_path, &target_path).map_err(|e| format!("Failed to replace binary: {}", e))?;
-        Ok("Create Client updated successfully! Restart the launcher to apply changes.".to_string())
+        fs::rename(&tmp_path, &actual_target).map_err(|e| format!("Failed to replace binary: {}", e))?;
+
+        let actual_str = actual_target.to_string_lossy().to_string();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+            let _ = std::process::Command::new(&actual_str).spawn();
+            std::process::exit(0);
+        });
+
+        Ok("Create Client updated in place! Restarting launcher...".to_string())
     }
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let old_exe = current_exe.with_extension("old");
         let _ = fs::remove_file(&old_exe);
 
-        // Rename running exe to .old (NTFS allows renaming executing binaries)
+        // 1. Rename running exe to .old so the current_exe path is completely free
         fs::rename(&current_exe, &old_exe).map_err(|e| format!("Failed to rename running executable: {}", e))?;
 
-        // Write new binary directly to current_exe
+        // 2. Write new binary directly to current_exe (exact same location, exact same file name!)
         if let Err(e) = fs::write(&current_exe, &bytes) {
             let _ = fs::rename(&old_exe, &current_exe);
             return Err(format!("Failed to write updated executable: {}", e));
         }
 
-        Ok("Create Client updated successfully! Please restart the launcher to apply changes.".to_string())
+        // 3. Spawn a hidden detached cmd background process that waits for this process to exit, deletes old_exe, and restarts the updated client
+        let old_str = old_exe.to_string_lossy().to_string();
+        let current_str = current_exe.to_string_lossy().to_string();
+
+        let cmd_script = format!(
+            "ping 127.0.0.1 -n 3 > NUL & del /F /Q \"{}\" & start \"\" \"{}\"",
+            old_str, current_str
+        );
+
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", &cmd_script])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+
+        // 4. Exit this process cleanly after a short delay so the frontend displays the update message and file lock is released
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(1200));
+            std::process::exit(0);
+        });
+
+        Ok("Create Client updated in place! Restarting launcher...".to_string())
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
