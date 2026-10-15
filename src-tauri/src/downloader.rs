@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
-use crate::launcher::{is_rule_allowed, maven_to_path, VersionMeta};
+use crate::launcher::{is_library_for_current_platform, maven_to_path, VersionMeta};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressPayload {
@@ -741,7 +741,7 @@ pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), St
     // Check which libraries are missing for the current platform
     let mut missing_libs = Vec::new();
     for lib in &version_meta.libraries {
-        if !is_rule_allowed(&lib.rules) {
+        if !is_library_for_current_platform(lib) {
             continue;
         }
 
@@ -839,10 +839,8 @@ fn extract_natives_from_jar(jar_path: &Path, natives_dir: &Path) {
                     if name.ends_with(".dll") || name.ends_with(".so") || name.ends_with(".dylib") {
                         if let Some(file_name) = Path::new(&name).file_name() {
                             let dest = natives_dir.join(file_name);
-                            if !dest.exists() {
-                                if let Ok(mut out) = File::create(&dest) {
-                                    let _ = std::io::copy(&mut entry, &mut out);
-                                }
+                            if let Ok(mut out) = File::create(&dest) {
+                                let _ = std::io::copy(&mut entry, &mut out);
                             }
                         }
                     }

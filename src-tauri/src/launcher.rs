@@ -121,6 +121,45 @@ pub fn is_rule_allowed(rules: &[LibraryRule]) -> bool {
     allowed
 }
 
+pub fn is_library_for_current_platform(lib: &VersionLibrary) -> bool {
+    if !is_rule_allowed(&lib.rules) {
+        return false;
+    }
+
+    if let Some(name) = &lib.name {
+        // Filter out non-x86_64 architectures on x86_64 machines (both Windows and Linux)
+        #[cfg(target_arch = "x86_64")]
+        {
+            if name.ends_with("-x86")
+                || name.contains("-x86-")
+                || name.contains("-arm64")
+                || name.contains("-arm32")
+                || name.contains("aarch_64")
+                || name.contains("linux-arm")
+                || name.contains("osx-arm64")
+            {
+                return false;
+            }
+        }
+
+        // Filter out non-aarch64 architectures on aarch64 machines
+        #[cfg(target_arch = "aarch64")]
+        {
+            if name.ends_with("-x86")
+                || name.contains("-x86-")
+                || name.contains("-arm32")
+                || name.contains("x86_64")
+                || name.ends_with(":natives-windows")
+                || name.ends_with(":natives-linux")
+            {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 pub fn maven_to_path(name: &str) -> Option<String> {
     let parts: Vec<&str> = name.split(':').collect();
     if parts.len() < 3 {
@@ -181,7 +220,7 @@ pub fn launch_minecraft(
                     if lib.include_in_classpath == Some(false) {
                         continue;
                     }
-                    if !is_rule_allowed(&lib.rules) {
+                    if !is_library_for_current_platform(&lib) {
                         continue;
                     }
 
@@ -282,8 +321,11 @@ pub fn launch_minecraft(
 
     // Standard JVM Properties
     cmd.arg(format!("-Djava.library.path={}", natives_dir.to_string_lossy()));
+    cmd.arg(format!("-Djna.tmpdir={}", natives_dir.to_string_lossy()));
+    cmd.arg(format!("-Dorg.lwjgl.system.SharedLibraryExtractPath={}", natives_dir.to_string_lossy()));
+    cmd.arg(format!("-Dio.netty.native.workdir={}", natives_dir.to_string_lossy()));
     cmd.arg("-Dminecraft.launcher.brand=CreateClient");
-    cmd.arg("-Dminecraft.launcher.version=0.1.0");
+    cmd.arg("-Dminecraft.launcher.version=1.0.7");
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
     cmd.arg("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-,1.20.1-47.4.20.jar,1.20.1.jar");
     cmd.arg("-DmergeModules=jna-5.10.0.jar,jna-platform-5.10.0.jar");
@@ -341,6 +383,14 @@ pub fn launch_minecraft(
         use std::os::unix::process::CommandExt;
         cmd.stdin(Stdio::null());
         cmd.process_group(0);
+
+        let current_ld = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let new_ld = if current_ld.is_empty() {
+            natives_dir.to_string_lossy().to_string()
+        } else {
+            format!("{}:{}", natives_dir.to_string_lossy(), current_ld)
+        };
+        cmd.env("LD_LIBRARY_PATH", new_ld);
     }
 
     #[cfg(windows)]
@@ -348,6 +398,16 @@ pub fn launch_minecraft(
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let java_bin_dir = java_bin.parent().unwrap_or(Path::new(""));
+        let new_path = format!(
+            "{};{};{}",
+            natives_dir.to_string_lossy(),
+            java_bin_dir.to_string_lossy(),
+            current_path
+        );
+        cmd.env("PATH", new_path);
     }
 
     // Redirect stdout and stderr to launcher_log.txt in game directory for easy debugging
