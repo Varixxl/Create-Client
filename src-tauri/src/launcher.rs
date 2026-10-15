@@ -325,7 +325,7 @@ pub fn launch_minecraft(
     cmd.arg(format!("-Dorg.lwjgl.system.SharedLibraryExtractPath={}", natives_dir.to_string_lossy()));
     cmd.arg(format!("-Dio.netty.native.workdir={}", natives_dir.to_string_lossy()));
     cmd.arg("-Dminecraft.launcher.brand=CreateClient");
-    cmd.arg("-Dminecraft.launcher.version=1.0.7");
+    cmd.arg("-Dminecraft.launcher.version=1.0.8");
     cmd.arg("-Djava.net.preferIPv6Addresses=system");
     cmd.arg("-DignoreList=bootstraplauncher,securejarhandler,asm-commons,asm-util,asm-analysis,asm-tree,asm,JarJarFileSystems,client-extra,fmlcore,javafmllanguage,lowcodelanguage,mclanguage,forge-,1.20.1-47.4.20.jar,1.20.1.jar");
     cmd.arg("-DmergeModules=jna-5.10.0.jar,jna-platform-5.10.0.jar");

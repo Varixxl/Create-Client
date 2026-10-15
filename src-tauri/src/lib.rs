@@ -84,7 +84,7 @@ async fn sync_modpack(app: AppHandle, force_repair: bool) -> Result<String, Stri
     let _ = downloader::ensure_java(&app, &runtime_dir).await?;
 
     // 2. Ensure Minecraft Assets
-    let _ = downloader::ensure_assets(&game_dir).await;
+    let _ = downloader::ensure_assets(&app, &game_dir).await;
 
     // 3. Synchronize modpack files from GitHub release manifest
     let sync_result = if !cfg.release_manifest_url.trim().is_empty() {
@@ -111,8 +111,9 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     let runtime_dir = downloader::get_runtime_dir();
     let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
 
-    // Ensure all platform-specific libraries and natives are present before launching
+    // Ensure all platform-specific libraries, natives, and vanilla assets are present before launching
     let _ = downloader::ensure_libraries(&app, &game_dir).await;
+    let _ = downloader::ensure_assets(&app, &game_dir).await;
 
     // Launch Forge process
     launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)

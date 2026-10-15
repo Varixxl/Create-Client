@@ -684,37 +684,198 @@ fn extract_modpack_safely(zip_path: &Path, game_dir: &Path) -> Result<(), String
     Ok(())
 }
 
-pub async fn ensure_assets(game_dir: &Path) -> Result<PathBuf, String> {
+#[derive(Debug, Deserialize)]
+struct AssetIndex {
+    objects: std::collections::HashMap<String, AssetEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AssetEntry {
+    hash: String,
+    size: u64,
+}
+
+pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, String> {
     let assets_dir = game_dir.join("assets");
     let indexes_dir = assets_dir.join("indexes");
+    let objects_dir = assets_dir.join("objects");
     let index_file = indexes_dir.join("5.json");
 
     let _ = fs::create_dir_all(&indexes_dir);
+    let _ = fs::create_dir_all(&objects_dir);
 
-    // If local Modrinth meta assets exist, symlink them so the client has full assets immediately
-    let modrinth_assets = PathBuf::from("/home/varixxl/.local/share/ModrinthApp/meta/assets");
-    let objects_dir = assets_dir.join("objects");
-    if !objects_dir.exists() && modrinth_assets.join("objects").exists() {
-        #[cfg(unix)]
-        let _ = std::os::unix::fs::symlink(modrinth_assets.join("objects"), &objects_dir);
+    // If index file doesn't exist, download it from Mojang
+    if !index_file.exists() {
+        let client = Client::new();
+        if let Ok(res) = client
+            .get("https://piston-meta.mojang.com/v1/packages/3d1e8e9cad62f188270564f4bdfd3a79df9be65a/5.json")
+            .send()
+            .await
+        {
+            if let Ok(bytes) = res.bytes().await {
+                let _ = fs::write(&index_file, bytes);
+            }
+        }
     }
 
     if !index_file.exists() {
-        if modrinth_assets.join("indexes/5.json").exists() {
-            let _ = fs::copy(modrinth_assets.join("indexes/5.json"), &index_file);
-        } else {
-            let client = Client::new();
-            if let Ok(res) = client
-                .get("https://piston-meta.mojang.com/v1/packages/3d1e8e9cad62f188270564f4bdfd3a79df9be65a/5.json")
-                .send()
-                .await
-            {
-                if let Ok(bytes) = res.bytes().await {
-                    let _ = fs::write(&index_file, bytes);
+        return Ok(assets_dir);
+    }
+
+    let content = match fs::read_to_string(&index_file) {
+        Ok(c) => c,
+        Err(_) => return Ok(assets_dir),
+    };
+
+    let index: AssetIndex = match serde_json::from_str(&content) {
+        Ok(idx) => idx,
+        Err(_) => return Ok(assets_dir),
+    };
+
+    // Fast-import from existing launcher installations if available (Modrinth, Minecraft, Prism)
+    let mut candidate_dirs: Vec<PathBuf> = Vec::new();
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let data = base_dirs.data_dir();
+        let home = base_dirs.home_dir();
+        candidate_dirs.push(data.join("com.modrinth.theseus").join("meta").join("assets").join("objects"));
+        candidate_dirs.push(data.join("ModrinthApp").join("meta").join("assets").join("objects"));
+        candidate_dirs.push(data.join(".minecraft").join("assets").join("objects"));
+        candidate_dirs.push(home.join(".minecraft").join("assets").join("objects"));
+        candidate_dirs.push(data.join("PrismLauncher").join("assets").join("objects"));
+        candidate_dirs.push(home.join(".local").join("share").join("ModrinthApp").join("meta").join("assets").join("objects"));
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let p = PathBuf::from(appdata);
+            candidate_dirs.push(p.join("com.modrinth.theseus").join("meta").join("assets").join("objects"));
+            candidate_dirs.push(p.join(".minecraft").join("assets").join("objects"));
+            candidate_dirs.push(p.join("PrismLauncher").join("assets").join("objects"));
+        }
+    }
+
+    for candidate in &candidate_dirs {
+        if candidate.is_dir() {
+            for entry in index.objects.values() {
+                let hash = &entry.hash;
+                if hash.len() < 2 {
+                    continue;
+                }
+                let prefix = &hash[0..2];
+                let dest = objects_dir.join(prefix).join(hash);
+                if !dest.exists() {
+                    let src = candidate.join(prefix).join(hash);
+                    if src.is_file() {
+                        if let Some(p) = dest.parent() {
+                            let _ = fs::create_dir_all(p);
+                        }
+                        if fs::hard_link(&src, &dest).is_err() {
+                            let _ = fs::copy(&src, &dest);
+                        }
+                    }
                 }
             }
         }
     }
+
+    // Identify any assets that are still missing from disk
+    let mut missing_objects: Vec<(String, PathBuf, u64)> = Vec::new();
+    let mut total_missing_bytes: u64 = 0;
+
+    for entry in index.objects.values() {
+        let hash = &entry.hash;
+        if hash.len() < 2 {
+            continue;
+        }
+        let prefix = &hash[0..2];
+        let dest = objects_dir.join(prefix).join(hash);
+        if !dest.exists() {
+            let url = format!("https://resources.download.minecraft.net/{}/{}", prefix, hash);
+            missing_objects.push((url, dest, entry.size));
+            total_missing_bytes += entry.size;
+        }
+    }
+
+    if missing_objects.is_empty() {
+        return Ok(assets_dir);
+    }
+
+    // Concurrently download missing objects from Mojang CDN
+    let client = Client::builder()
+        .pool_max_idle_per_host(32)
+        .build()
+        .unwrap_or_else(|_| Client::new());
+
+    let downloaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let total_count = missing_objects.len();
+    let completed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let start_time = Instant::now();
+    let last_emit = std::sync::Arc::new(tokio::sync::Mutex::new(Instant::now()));
+
+    let stream = futures_util::stream::iter(missing_objects).map(|(url, dest, size)| {
+        let client = client.clone();
+        let app = app.clone();
+        let downloaded = downloaded_bytes.clone();
+        let completed = completed_count.clone();
+        let last_emit = last_emit.clone();
+
+        async move {
+            if let Some(parent) = dest.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+
+            if let Ok(res) = client.get(&url).send().await {
+                if res.status().is_success() {
+                    if let Ok(bytes) = res.bytes().await {
+                        let _ = fs::write(&dest, bytes);
+                    }
+                }
+            }
+
+            let cur_bytes = downloaded.fetch_add(size, std::sync::atomic::Ordering::Relaxed) + size;
+            let count = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+
+            let mut emit_guard = last_emit.lock().await;
+            if emit_guard.elapsed().as_millis() >= 150 || count == total_count {
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let speed = if elapsed > 0.0 {
+                    (cur_bytes as f64 / elapsed) as u64
+                } else {
+                    0
+                };
+                let percentage = if total_missing_bytes > 0 {
+                    (cur_bytes as f64 / total_missing_bytes as f64) * 100.0
+                } else {
+                    100.0
+                };
+
+                let _ = app.emit(
+                    "download-progress",
+                    ProgressPayload {
+                        task: format!("Downloading Minecraft assets ({}/{})", count, total_count),
+                        current_bytes: cur_bytes,
+                        total_bytes: total_missing_bytes,
+                        percentage,
+                        speed_bytes_sec: speed,
+                    },
+                );
+                *emit_guard = Instant::now();
+            }
+        }
+    });
+
+    stream.buffer_unordered(24).collect::<Vec<()>>().await;
+
+    let _ = app.emit(
+        "download-progress",
+        ProgressPayload {
+            task: "Assets synchronized".to_string(),
+            current_bytes: total_missing_bytes,
+            total_bytes: total_missing_bytes,
+            percentage: 100.0,
+            speed_bytes_sec: 0,
+        },
+    );
 
     Ok(assets_dir)
 }
