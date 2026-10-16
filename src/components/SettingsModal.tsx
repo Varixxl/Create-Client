@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle } from "lucide-react";
-import { AppConfig } from "../types";
+import React, { useState, useEffect } from "react";
+import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle, Monitor, Sparkles } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { AppConfig, GraphicsInfo } from "../types";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -28,7 +29,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [ram, setRam] = useState(config.ram_gb);
   const [jvmFlags, setJvmFlags] = useState(config.jvm_flags);
   const [gameDir, setGameDir] = useState(config.game_dir);
+  const [graphicsPreset, setGraphicsPreset] = useState(config.graphics_preset || "auto");
+  const [graphicsInfo, setGraphicsInfo] = useState<GraphicsInfo | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      invoke<GraphicsInfo>("get_graphics_info")
+        .then((info) => setGraphicsInfo(info))
+        .catch((err) => console.warn("Failed to fetch graphics info:", err));
+    }
+  }, [isOpen]);
 
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -43,6 +54,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       ram_gb: ram,
       jvm_flags: jvmFlags,
       game_dir: gameDir,
+      graphics_preset: graphicsPreset,
     };
     await onSaveConfig(updated);
     setSavedSuccess(true);
@@ -94,6 +106,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Modal Form Body */}
         <div className="p-6 overflow-y-auto space-y-6 text-xs text-[#e4e8ee]">
+          {/* Graphics Preset Selector */}
+          <div className="space-y-2.5 p-3.5 bg-[#141b26] border border-[#263042] rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#12c3ca]" />
+                <label className="font-bold text-[#e4e8ee] uppercase tracking-wider text-[11px]">
+                  Graphics & Performance Preset
+                </label>
+              </div>
+              {graphicsInfo && (
+                <div className="flex items-center gap-1 text-[10px] font-mono text-[#5ce1e6] bg-[#12c3ca]/10 px-2 py-0.5 rounded border border-[#12c3ca]/30">
+                  <Monitor className="w-3 h-3 text-[#12c3ca]" />
+                  <span>{graphicsInfo.detected_refresh_rate}Hz Sync</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setGraphicsPreset("auto")}
+                className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  graphicsPreset === "auto"
+                    ? "bg-[#182a3a] border-[#12c3ca] shadow-sm shadow-[#12c3ca]/20"
+                    : "bg-[#1c2432] border-[#263042] hover:border-[#12c3ca]/50 text-[#8fa0bc]"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#e4e8ee] text-xs">Auto Tier</span>
+                  <span className="text-[9px] px-1.5 py-0.2 bg-[#12c3ca]/20 text-[#5ce1e6] rounded uppercase font-mono">
+                    {graphicsInfo?.detected_tier || "DETECTED"}
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#8fa0bc] mt-1">
+                  Auto-detects GPU capabilities on launch
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGraphicsPreset("low")}
+                className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  graphicsPreset === "low"
+                    ? "bg-[#182a3a] border-[#12c3ca] shadow-sm shadow-[#12c3ca]/20"
+                    : "bg-[#1c2432] border-[#263042] hover:border-[#12c3ca]/50 text-[#8fa0bc]"
+                }`}
+              >
+                <span className="font-bold text-[#e4e8ee] text-xs">Low (Fast)</span>
+                <p className="text-[10px] text-[#8fa0bc] mt-1">
+                  DH 32c • POM Off • Laptops & Budget GPUs
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGraphicsPreset("medium")}
+                className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  graphicsPreset === "medium"
+                    ? "bg-[#182a3a] border-[#12c3ca] shadow-sm shadow-[#12c3ca]/20"
+                    : "bg-[#1c2432] border-[#263042] hover:border-[#12c3ca]/50 text-[#8fa0bc]"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#e4e8ee] text-xs">Medium</span>
+                  <span className="text-[9px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-mono">
+                    SWEET SPOT
+                  </span>
+                </div>
+                <p className="text-[10px] text-[#8fa0bc] mt-1">
+                  DH 64c + Fog • Patrix POM 3D • 1440p Smooth
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGraphicsPreset("ultra")}
+                className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                  graphicsPreset === "ultra"
+                    ? "bg-[#182a3a] border-[#12c3ca] shadow-sm shadow-[#12c3ca]/20"
+                    : "bg-[#1c2432] border-[#263042] hover:border-[#12c3ca]/50 text-[#8fa0bc]"
+                }`}
+              >
+                <span className="font-bold text-[#e4e8ee] text-xs">Ultra (Cinematic)</span>
+                <p className="text-[10px] text-[#8fa0bc] mt-1">
+                  Full POM Relief • High Shadows • 4K & High-End
+                </p>
+              </button>
+            </div>
+
+            {graphicsInfo?.detected_gpu && (
+              <div className="text-[10px] text-[#6b7b95] font-mono flex items-center justify-between pt-1">
+                <span className="truncate max-w-[280px]" title={graphicsInfo.detected_gpu}>
+                  GPU: {graphicsInfo.detected_gpu}
+                </span>
+                <span>Framerate locked to {graphicsInfo.detected_refresh_rate} FPS</span>
+              </div>
+            )}
+          </div>
+
           {/* RAM Allocation Slider */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">

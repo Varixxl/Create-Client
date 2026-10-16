@@ -10,6 +10,12 @@ pub struct AppConfig {
     pub azure_client_id: String,
     pub auto_connect: bool,
     pub release_manifest_url: String,
+    #[serde(default = "default_graphics_preset")]
+    pub graphics_preset: String,
+}
+
+fn default_graphics_preset() -> String {
+    "auto".to_string()
 }
 
 pub const DEFAULT_AZURE_CLIENT_ID: &str = "43e4ff18-9c63-455f-9224-a124a6b71086";
@@ -25,6 +31,7 @@ impl Default for AppConfig {
             azure_client_id: DEFAULT_AZURE_CLIENT_ID.to_string(),
             auto_connect: false,
             release_manifest_url: "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string(),
+            graphics_preset: default_graphics_preset(),
         }
     }
 }

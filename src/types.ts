@@ -5,6 +5,13 @@ export interface AppConfig {
   azure_client_id: string;
   auto_connect: boolean;
   release_manifest_url: string;
+  graphics_preset: string;
+}
+
+export interface GraphicsInfo {
+  detected_gpu: string;
+  detected_tier: string;
+  detected_refresh_rate: number;
 }
 
 export interface MinecraftProfile {

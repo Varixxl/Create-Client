@@ -194,6 +194,7 @@ pub fn launch_minecraft(
     ram_gb: u32,
     custom_jvm_flags: &str,
     auto_connect: bool,
+    graphics_preset: &str,
 ) -> Result<u32, String> {
     if !java_bin.exists() {
         return Err(format!("Java executable not found at: {:?}", java_bin));
@@ -202,8 +203,10 @@ pub fn launch_minecraft(
         return Err(format!("Game directory not found at: {:?}", game_dir));
     }
 
-    // Sanitize options.txt to ensure native resolution without legacy override constraints
-    sanitize_options_txt(game_dir);
+    // Detect display refresh rate and apply requested graphics preset (or auto-detected tier)
+    let refresh_rate = detect_refresh_rate();
+    apply_graphics_preset(game_dir, graphics_preset);
+    sanitize_options_txt(game_dir, refresh_rate);
 
     let lib_dir = game_dir.join("libraries");
     let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
@@ -468,12 +471,188 @@ fn collect_jars(dir: &Path, jars: &mut Vec<PathBuf>) {
     }
 }
 
-pub fn sanitize_options_txt(game_dir: &Path) {
+pub fn detect_refresh_rate() -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        // 1. Try hyprctl monitors (detect focused monitor first)
+        if let Ok(output) = Command::new("hyprctl").arg("monitors").output() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                let monitors: Vec<&str> = text.split("Monitor ").collect();
+                for m in &monitors {
+                    if m.contains("focused: yes") {
+                        if let Some(pos) = m.find('@') {
+                            let sub = &m[pos + 1..];
+                            let end = sub.find(|c: char| !c.is_numeric() && c != '.').unwrap_or(sub.len());
+                            if let Ok(rate) = sub[..end].parse::<f32>() {
+                                return rate.round() as u32;
+                            }
+                        }
+                    }
+                }
+                // Fallback to first monitor's rate
+                for m in &monitors {
+                    if let Some(pos) = m.find('@') {
+                        let sub = &m[pos + 1..];
+                        let end = sub.find(|c: char| !c.is_numeric() && c != '.').unwrap_or(sub.len());
+                        if let Ok(rate) = sub[..end].parse::<f32>() {
+                            return rate.round() as u32;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Try xrandr
+        if let Ok(output) = Command::new("xrandr").output() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                for line in text.lines() {
+                    if line.contains('*') {
+                        for token in line.split_whitespace() {
+                            if token.ends_with('*') || token.ends_with("*+") {
+                                let num = token.trim_end_matches('*').trim_end_matches('+');
+                                if let Ok(rate) = num.parse::<f32>() {
+                                    return rate.round() as u32;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty CurrentRefreshRate"])
+            .output()
+        {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                for line in text.lines() {
+                    if let Ok(rate) = line.trim().parse::<u32>() {
+                        if rate > 0 {
+                            return rate;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    60
+}
+
+pub fn detect_gpu_name() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = Command::new("lspci").output() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                for line in text.lines() {
+                    if line.contains("VGA compatible controller") || line.contains("3D controller") {
+                        if let Some(pos) = line.find(": ") {
+                            return line[pos + 2..].to_string();
+                        }
+                        return line.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"])
+            .output()
+        {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        return trimmed.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    "Standard Graphics Device".to_string()
+}
+
+pub fn detect_gpu_tier() -> &'static str {
+    let name = detect_gpu_name().to_uppercase();
+    if name.contains("3070") || name.contains("3080") || name.contains("3090")
+        || name.contains("4070") || name.contains("4080") || name.contains("4090")
+        || name.contains("6800") || name.contains("6900") || name.contains("7800") || name.contains("7900")
+        || name.contains("RX 7900") || name.contains("RX 7800")
+    {
+        return "ultra";
+    }
+    if name.contains("2060") || name.contains("2070") || name.contains("2080")
+        || name.contains("3060") || name.contains("4060") || name.contains("6600")
+        || name.contains("6700") || name.contains("5700") || name.contains("GTX 1080")
+    {
+        return "medium";
+    }
+    "low"
+}
+
+pub fn apply_graphics_preset(game_dir: &Path, requested_preset: &str) {
+    let mode = if requested_preset.is_empty() || requested_preset == "auto" {
+        detect_gpu_tier()
+    } else {
+        requested_preset
+    };
+
+    let preset_dir = game_dir.join("config").join("presets").join(mode);
+    if preset_dir.exists() {
+        // 1. Copy shaderpack config
+        let preset_shader = preset_dir.join("ComplementaryUnbound_r5.9.3.zip.txt");
+        let target_shader = game_dir.join("shaderpacks").join("ComplementaryUnbound_r5.9.3.zip.txt");
+        if preset_shader.exists() {
+            let _ = fs::copy(&preset_shader, &target_shader);
+        }
+
+        // 2. Copy Distant Horizons config
+        let preset_dh = preset_dir.join("DistantHorizons.toml");
+        let target_dh = game_dir.join("config").join("DistantHorizons.toml");
+        if preset_dh.exists() {
+            let _ = fs::copy(&preset_dh, &target_dh);
+        }
+
+        // 3. Update options.txt with preset's render distance and simulation distance
+        let (rd, sd) = match mode {
+            "low" => (8, 6),
+            "ultra" => (14, 10),
+            _ => (12, 8),
+        };
+        let options_file = game_dir.join("options.txt");
+        if options_file.exists() {
+            if let Ok(content) = fs::read_to_string(&options_file) {
+                let mut new_lines = Vec::new();
+                for line in content.lines() {
+                    if line.starts_with("renderDistance:") {
+                        new_lines.push(format!("renderDistance:{}", rd));
+                    } else if line.starts_with("simulationDistance:") {
+                        new_lines.push(format!("simulationDistance:{}", sd));
+                    } else {
+                        new_lines.push(line.to_string());
+                    }
+                }
+                let _ = fs::write(&options_file, new_lines.join("\n") + "\n");
+            }
+        }
+    }
+}
+
+pub fn sanitize_options_txt(game_dir: &Path, refresh_rate: u32) {
     let options_file = game_dir.join("options.txt");
     if options_file.exists() {
         if let Ok(content) = fs::read_to_string(&options_file) {
             let mut modified = false;
             let mut new_lines = Vec::new();
+            let mut found_max_fps = false;
+
             for line in content.lines() {
                 if line.starts_with("overrideWidth:") && line != "overrideWidth:0" {
                     new_lines.push("overrideWidth:0".to_string());
@@ -481,13 +660,29 @@ pub fn sanitize_options_txt(game_dir: &Path) {
                 } else if line.starts_with("overrideHeight:") && line != "overrideHeight:0" {
                     new_lines.push("overrideHeight:0".to_string());
                     modified = true;
+                } else if line.starts_with("maxFps:") {
+                    found_max_fps = true;
+                    let target = format!("maxFps:{}", refresh_rate);
+                    if line != target {
+                        new_lines.push(target);
+                        modified = true;
+                    } else {
+                        new_lines.push(line.to_string());
+                    }
                 } else {
                     new_lines.push(line.to_string());
                 }
             }
+
+            if !found_max_fps {
+                new_lines.push(format!("maxFps:{}", refresh_rate));
+                modified = true;
+            }
+
             if modified {
                 let _ = fs::write(&options_file, new_lines.join("\n") + "\n");
             }
         }
     }
 }
+

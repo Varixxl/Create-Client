@@ -116,7 +116,23 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     let _ = downloader::ensure_assets(&app, &game_dir).await;
 
     // Launch Forge process
-    launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect)
+    launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect, &cfg.graphics_preset)
+}
+
+#[derive(serde::Serialize)]
+pub struct GraphicsInfo {
+    pub detected_gpu: String,
+    pub detected_tier: String,
+    pub detected_refresh_rate: u32,
+}
+
+#[tauri::command]
+fn get_graphics_info() -> GraphicsInfo {
+    GraphicsInfo {
+        detected_gpu: launcher::detect_gpu_name(),
+        detected_tier: launcher::detect_gpu_tier().to_string(),
+        detected_refresh_rate: launcher::detect_refresh_rate(),
+    }
 }
 
 #[tauri::command]
@@ -254,7 +270,8 @@ pub fn run() {
             perform_client_update,
             check_modpack_update,
             delete_all_game_data,
-            reset_modpack_settings
+            reset_modpack_settings,
+            get_graphics_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
