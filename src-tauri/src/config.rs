@@ -18,7 +18,7 @@ fn default_graphics_preset() -> String {
     "auto".to_string()
 }
 
-pub const DEFAULT_AZURE_CLIENT_ID: &str = "43e4ff18-9c63-455f-9224-a124a6b71086";
+pub const DEFAULT_AZURE_CLIENT_ID: &str = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb";
 pub const DEFAULT_JVM_FLAGS: &str = "-XX:+UseZGC -XX:+AlwaysPreTouch";
 
 impl Default for AppConfig {
@@ -64,7 +64,9 @@ pub fn load_config() -> AppConfig {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(mut config) = serde_json::from_str::<AppConfig>(&content) {
                 let mut changed = false;
-                if config.azure_client_id.trim().is_empty() {
+                if config.azure_client_id.trim().is_empty()
+                    || config.azure_client_id == "43e4ff18-9c63-455f-9224-a124a6b71086"
+                {
                     config.azure_client_id = DEFAULT_AZURE_CLIENT_ID.to_string();
                     changed = true;
                 }

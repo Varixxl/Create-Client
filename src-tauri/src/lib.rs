@@ -23,34 +23,15 @@ fn save_config(config: AppConfig) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_auth_status() -> AuthStatus {
-    if let Some(profile) = auth::load_saved_profile() {
-        // If expired or about to expire in 5 minutes, attempt background refresh
-        let now_sec = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        if profile.expires_at <= now_sec + 300 {
-            let cfg = config::load_config();
-            if !cfg.azure_client_id.trim().is_empty() {
-                if let Ok(refreshed) = auth::refresh_saved_session(&cfg.azure_client_id, &profile.refresh_token).await {
-                    return AuthStatus {
-                        is_authenticated: true,
-                        profile: Some(refreshed),
-                    };
-                }
-            }
-        }
-
-        AuthStatus {
+    match auth::ensure_valid_profile(false).await {
+        Ok(Some(profile)) => AuthStatus {
             is_authenticated: true,
             profile: Some(profile),
-        }
-    } else {
-        AuthStatus {
+        },
+        _ => AuthStatus {
             is_authenticated: false,
             profile: None,
-        }
+        },
     }
 }
 
@@ -104,8 +85,11 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
     let cfg = config::load_config();
     let game_dir = PathBuf::from(&cfg.game_dir);
 
-    // Verify auth
-    let profile = auth::load_saved_profile().ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
+    // Verify and proactively refresh auth session so every launch starts with a fresh 24h token
+    let profile = auth::ensure_valid_profile(true)
+        .await
+        .map_err(|e| format!("Session expired and automatic refresh failed ({}). Please sign in again.", e))?
+        .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
     // Ensure Java 17
     let runtime_dir = downloader::get_runtime_dir();

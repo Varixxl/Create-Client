@@ -71,7 +71,12 @@ export const App: React.FC = () => {
       setErrorMsg(`Minecraft process stopped unexpectedly:\n${event.payload}`);
     });
 
+    const authRefreshInterval = setInterval(() => {
+      checkAuth();
+    }, 30 * 60 * 1000);
+
     return () => {
+      clearInterval(authRefreshInterval);
       unlistenProgressPromise.then((unlisten) => unlisten());
       unlistenGamePromise.then((unlisten) => unlisten());
       unlistenErrorPromise.then((unlisten) => unlisten());
@@ -285,6 +290,7 @@ export const App: React.FC = () => {
       setIsSyncing(false);
       setIsLaunching(true);
       await invoke("launch_game");
+      checkAuth();
 
       setIsRunning(true);
       setIsLaunching(false);

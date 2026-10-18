@@ -1,8 +1,8 @@
 import os, sys, json, requests
 
 TOKEN = os.environ.get('GITHUB_TOKEN', '')
-REPO = 'Varixxl/Create-Client'
-TAG = 'v1.0.8'
+REPO = 'JaviDaBomb/Create-Client'
+TAG = 'v1.0.9'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -14,14 +14,17 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - Windows OpenAL & Native Library Fixes',
-    'body': """## What's Changed in Create Client v1.0.7
+    'name': f'Create Client {TAG} - Persistent Microsoft Session Auto-Refresh & Graphics Presets',
+    'body': """## What's Changed in Create Client v1.0.9
 
-### 🎧 Critical OpenAL Audio & Video Sync Fixes for Windows
-- **Native Architecture Filtering:** Accurately filtered out 32-bit x86 and ARM native jars (`natives-windows-x86.jar`, `natives-windows-arm64.jar`) from the 64-bit Java runtime classpath, preventing library collisions.
-- **Process PATH Injection:** Explicitly prepended `<game_dir>/natives` and the JRE runtime `bin/` directory to the Windows child process `PATH` environment variable, enabling dynamic linking resolution for `OpenAL.dll` and its dependent helper libraries.
-- **Shared Library Extract Paths:** Configured `-Dorg.lwjgl.system.SharedLibraryExtractPath`, `-Djna.tmpdir`, and `-Dio.netty.native.workdir` JVM properties so LWJGL 3 locates OpenAL and GLFW native libraries directly in the native folder.
-- **In-Game Sound & Video Restoration:** Resolved silent block interaction acoustics (Sound Physics Remastered occlusion calculations) and FancyMenu main menu video background rendering (missing texture watchdog timeout) on Windows.""",
+### 🔐 Persistent Microsoft & Minecraft Session Auto-Refresh
+- **Eliminated 24-Hour Re-Login Requirement:** Fixed an OAuth Client ID mismatch during background token refresh so saved sessions renew seamlessly without requiring manual sign-out and sign-in every 24 hours.
+- **Automatic Pre-Launch Token Renewal:** Every game launch now proactively refreshes your Minecraft access token, guaranteeing a full 24-hour session validity window whenever you click **Play Game**.
+- **Continuous Background Refresh & Retry Resilience:** Added automatic 30-minute background session checks while the launcher is open along with multi-attempt retry logic for transient network/DNS hiccups.
+
+### ⚡ Graphics Presets Engine & Display Refresh Rate Lock
+- **Low, Medium, and Ultra Presets:** Select your graphics tier directly in Client Settings or let Auto Tier detect your GPU capabilities.
+- **Native Refresh Rate Sync:** Automatically detects your monitor's refresh rate and locks your frame cap to it for tear-free performance.""",
     'draft': False,
     'prerelease': False
 }
@@ -40,8 +43,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.0.8-windows-x64.zip', 'Create-Client-1.0.8-windows-x64.zip', 'application/zip'),
-    ('create-client-1.0.8-linux-x86_64.tar.gz', 'create-client-1.0.8-linux-x86_64.tar.gz', 'application/gzip')
+    ('Create-Client-1.0.9-windows-x64.zip', 'Create-Client-1.0.9-windows-x64.zip', 'application/zip'),
+    ('create-client', 'create-client', 'application/octet-stream'),
+    ('create-client-1.0.9-linux-x86_64.tar.gz', 'create-client-1.0.9-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:

@@ -156,13 +156,38 @@ pub async fn poll_device_flow(device_code: &str) -> Result<Option<MinecraftProfi
 // ---------------- Background Token Refresh ----------------
 
 pub async fn refresh_saved_session(client_id: &str, refresh_token: &str) -> Result<MinecraftProfile, String> {
-    let http = Client::new();
+    let mut last_err = String::new();
 
-    let cid = if client_id.trim().is_empty() {
-        ALLOWLISTED_CLIENT_ID
-    } else {
-        client_id
-    };
+    // Always prioritize ALLOWLISTED_CLIENT_ID since device flow issues tokens under it
+    let mut candidate_ids = vec![ALLOWLISTED_CLIENT_ID];
+    let trimmed = client_id.trim();
+    if !trimmed.is_empty() && trimmed != ALLOWLISTED_CLIENT_ID {
+        candidate_ids.push(trimmed);
+    }
+
+    for cid in candidate_ids {
+        for attempt in 1..=3 {
+            match try_refresh_with_client_id(cid, refresh_token).await {
+                Ok(profile) => return Ok(profile),
+                Err(e) => {
+                    last_err = e;
+                    // If Microsoft explicitly says invalid_grant, don't retry same client_id
+                    if last_err.contains("invalid_grant") {
+                        break;
+                    }
+                    if attempt < 3 {
+                        tokio::time::sleep(std::time::Duration::from_millis(600 * attempt)).await;
+                    }
+                }
+            }
+        }
+    }
+
+    Err(last_err)
+}
+
+async fn try_refresh_with_client_id(cid: &str, refresh_token: &str) -> Result<MinecraftProfile, String> {
+    let http = Client::new();
 
     let token_params = [
         ("client_id", cid),
@@ -186,7 +211,7 @@ pub async fn refresh_saved_session(client_id: &str, refresh_token: &str) -> Resu
     #[derive(Deserialize)]
     struct MsRefreshResponse {
         access_token: String,
-        refresh_token: String,
+        refresh_token: Option<String>,
     }
 
     let ms_tokens: MsRefreshResponse = ms_res
@@ -194,7 +219,39 @@ pub async fn refresh_saved_session(client_id: &str, refresh_token: &str) -> Resu
         .await
         .map_err(|e| format!("Failed to parse refreshed token JSON: {}", e))?;
 
-    authenticate_with_ms_token(cid, &ms_tokens.access_token, &ms_tokens.refresh_token).await
+    let new_refresh = ms_tokens.refresh_token.as_deref().unwrap_or(refresh_token);
+    authenticate_with_ms_token(cid, &ms_tokens.access_token, new_refresh).await
+}
+
+pub async fn ensure_valid_profile(force_refresh: bool) -> Result<Option<MinecraftProfile>, String> {
+    let profile = match load_saved_profile() {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+
+    let now_sec = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Refresh if forced (e.g., on game launch) or if less than 12 hours remain before expiry
+    let needs_refresh = force_refresh || profile.expires_at <= now_sec + 43200;
+
+    if needs_refresh {
+        let cfg = crate::config::load_config();
+        match refresh_saved_session(&cfg.azure_client_id, &profile.refresh_token).await {
+            Ok(refreshed) => return Ok(Some(refreshed)),
+            Err(err) => {
+                // If existing access_token is still valid for >5 minutes, fall back to it gracefully
+                if profile.expires_at > now_sec + 300 {
+                    return Ok(Some(profile));
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(Some(profile))
 }
 
 // ---------------- Xbox Live, XSTS & Minecraft Services ----------------
