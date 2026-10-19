@@ -8,7 +8,7 @@ if not TOKEN:
         pass
 
 REPO = 'Varixxl/Create-Client'
-TAG = 'v1.2.0'
+TAG = 'v1.2.1'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -20,36 +20,26 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - Content Manager, Dynamic Loaders & Dedicated Server Creator',
-    'body': """## What's Changed in Create Client v1.2.0
+    'name': f'Create Client {TAG} - Per-Profile Java Manager, JVM Sanitization & Crash Diagnostics',
+    'body': """## What's Changed in Create Client v1.2.1
 
-### 🧩 Per-Profile Content Manager (Modrinth & CurseForge)
-- **Multi-Source Content Discovery:** Search and install content directly from **Modrinth** and **CurseForge** with a unified, high-speed interface.
-- **Triple Content Support:** Native management for **Mods**, **Resource Packs**, and **Shaders** with isolated directories per instance (`mods/`, `resourcepacks/`, `shaderpacks/`).
-- **User-Configured CurseForge API Key:** Simple, secure integration for personal CurseForge API keys configurable directly in Settings.
-- **Fixed Image & Icon Rendering:** Resolved WebView CSP restrictions for Modrinth CDN and CurseForge avatars, complete with graceful fallback avatars.
+### ☕ Per-Profile Java Manager & Automatic Version Compatibility
+- **Per-Profile Java Versioning:** Assign a specific Java version (Java 8, 11, 16, 17, 21, or Auto-Detect) directly on individual profiles via the Edit Profile settings.
+- **Strict Compatibility Enforcement:** Automatically detects and enforces runtime compatibility requirements for specific Minecraft and modloader combinations (e.g., enforcing Java 17 for Forge 1.20.1).
+- **Multi-Version Runtime Provisioning:** Seamless background provisioning for Adoptium Temurin OpenJDK across platforms without manual Java environment setup.
 
-### ⚡ Dynamic Modloader & Version Engine
-- **Universal Loader Support:** Create profiles with **Fabric**, **Quilt**, **Forge**, **NeoForge**, or clean **Vanilla**.
-- **Real-Time Loader Metadata Resolution:** Queries official loader metadata APIs to fetch recommended and stable loader builds automatically.
-- **Snapshot & Pre-Release Support:** 1-click toggle to browse and install Minecraft snapshots and pre-releases alongside stable releases.
+### 🛡️ Smart JVM Argument Sanitization & VM Error Prevention
+- **Eliminated JVM Startup Failures:** Resolved `Could not create the Java Virtual Machine: Unrecognized VM option 'ZGenerational'` crashes.
+- **Dynamic Garbage Collector Fallback:** Inspects target Java version before launch; automatically removes JDK 21+ only flags like `-XX:+ZGenerational` and cleanly falls back to `-XX:+UseG1GC` on Java < 21.
 
-### 🖥️ Pre-Installed Dedicated Server Creator (Beta)
-- **1-Click Dedicated Server Generation:** Generate a ready-to-run dedicated server instance from *any* profile directly in the client.
-- **Smart Client-Only Mod Filtering:** Automatic multi-tier filtering (file heuristics, `fabric.mod.json`, and `META-INF/mods.toml` inspection) removes client-only rendering engines, HUDs, FancyMenu, minimaps, and shaders so the server starts cleanly without crashing.
-- **Ready to Run:** Pre-accepts `eula.txt`, generates optimized start scripts (`run.sh` / `run.bat`), pre-configures `server.properties`, and tracks server manifest.
+### 🔍 Enhanced Crash Diagnostics & Real-Time Troubleshooting
+- **Automated Exit Code & Stderr Inspection:** Inspects exit codes and standard error output to detect JVM misconfigurations, memory errors, or missing dependencies.
+- **Actionable Error Feedback:** Shows instant, readable crash diagnosis modals with direct pointers to the root cause.
 
-### 📊 Persistent Sidebar Download Progress
-- **Consistent Progress Tracking:** Download progress bar and status text placed permanently at the bottom of the left sidebar (`ProfileSidebar`), displaying active tasks, progress percentage, current/total size, and real-time transfer speeds in MB/s.
-
-### 🌐 Scoped Server Management Tab (`[Servers (N)]`)
-- **Profile-Scoped Visibility:** Dedicated `[Servers (N)]` workspace tab conditionally appears only on profiles that have created server instances.
-- **Live Server List Ping (SLP):** Real-time server status polling showing Online/Offline status, ping (ms), live online player counts, max capacity, MOTD, and version info.
-- **1-Click Folder Access:** Instant access to open server directories in your system file manager.
-
-### 🔄 Profile Change Detection & Divergence Sync
-- **Automated Divergence Tracking:** Automatically compares profile mods against server mods to detect when mods have been added or removed in the profile.
-- **1-Click Server Sync:** Prominently alerts you when divergence occurs with a 1-click action to sync added and removed mods to the dedicated server instance.""",
+### 🎨 UI Polish & Toast Improvements
+- **Bottom-Right Toast Positioning:** Moved toast notifications to the bottom-right corner to prevent obstructing navigation bars and action buttons.
+- **Faded Panorama Background:** Added subtle panorama styling to enhance launcher aesthetics.
+- **Scoped Server Status Badges:** Improved server status indicator scoping for multi-profile workflows.""",
     'draft': False,
     'prerelease': False
 }
@@ -68,9 +58,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.2.0-windows-x64.zip', 'Create-Client-1.2.0-windows-x64.zip', 'application/zip'),
+    ('Create-Client-1.2.1-windows-x64.zip', 'Create-Client-1.2.1-windows-x64.zip', 'application/zip'),
     ('create-client', 'create-client', 'application/octet-stream'),
-    ('create-client-1.2.0-linux-x86_64.tar.gz', 'create-client-1.2.0-linux-x86_64.tar.gz', 'application/gzip')
+    ('create-client-1.2.1-linux-x86_64.tar.gz', 'create-client-1.2.1-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:
