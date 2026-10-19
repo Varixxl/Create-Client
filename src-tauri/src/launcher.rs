@@ -196,6 +196,9 @@ pub fn launch_minecraft(
     auto_connect: bool,
     graphics_preset: &str,
 ) -> Result<u32, String> {
+    if IS_MINECRAFT_RUNNING.load(Ordering::SeqCst) {
+        return Err("Minecraft is already running.".to_string());
+    }
     if !java_bin.exists() {
         return Err(format!("Java executable not found at: {:?}", java_bin));
     }
@@ -271,7 +274,7 @@ pub fn launch_minecraft(
         .collect::<Vec<_>>()
         .join(separator);
 
-    // 2. Module Path (Required for Java 17 Forge 1.20.1)
+    // 2. Module Path (Required for Forge 1.20.1)
     let module_relative_jars = [
         "cpw/mods/bootstraplauncher/1.1.2/bootstraplauncher-1.1.2.jar",
         "cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar",
@@ -315,11 +318,28 @@ pub fn launch_minecraft(
     cmd.arg("-Xms512M");
     cmd.arg(format!("-Xmx{}G", ram_gb));
 
-    // Custom JVM flags
+    // Custom JVM flags (deduplicated, with ZGC fallback only if no GC flag is specified)
+    let mut final_jvm_flags: Vec<String> = Vec::new();
     for flag in custom_jvm_flags.split_whitespace() {
-        if !flag.is_empty() {
-            cmd.arg(flag);
+        if !flag.is_empty() && !final_jvm_flags.iter().any(|f| f == flag) {
+            final_jvm_flags.push(flag.to_string());
         }
+    }
+
+    let has_gc_flag = final_jvm_flags
+        .iter()
+        .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
+
+    if !has_gc_flag {
+        for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
+            if !final_jvm_flags.iter().any(|f| f == fallback) {
+                final_jvm_flags.push(fallback.to_string());
+            }
+        }
+    }
+
+    for flag in &final_jvm_flags {
+        cmd.arg(flag);
     }
 
     // Standard JVM Properties
@@ -343,9 +363,6 @@ pub fn launch_minecraft(
         cmd.arg("--add-exports").arg("java.base/sun.security.util=cpw.mods.securejarhandler");
         cmd.arg("--add-exports").arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
         cmd.arg("--add-opens").arg("java.base/java.lang.reflect=ALL-UNNAMED");
-        cmd.arg("-XX:+UseZGC");
-        cmd.arg("-XX:+ZGenerational");
-        cmd.arg("-XX:+AlwaysPreTouch");
     }
 
     // Classpath
@@ -445,6 +462,189 @@ pub fn launch_minecraft(
             if let Ok(exit_status) = wait_res {
                 if !exit_status.success() {
                     let log_file = game_dir_buf.join("launcher_log.txt");
+                    if let Ok(log_content) = fs::read_to_string(&log_file) {
+                        let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
+                        let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
+                        let _ = app_handle.emit("game-error", err_summary);
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(pid)
+}
+
+pub fn launch_fabric_or_vanilla(
+    app: &AppHandle,
+    java_bin: &Path,
+    instance_dir: &Path,
+    profile: &MinecraftProfile,
+    ram_gb: u32,
+    custom_jvm_flags: &str,
+) -> Result<u32, String> {
+    if IS_MINECRAFT_RUNNING.load(Ordering::SeqCst) {
+        return Err("Minecraft is already running.".to_string());
+    }
+    if !java_bin.exists() {
+        return Err(format!("Java executable not found at: {:?}", java_bin));
+    }
+    if !instance_dir.exists() {
+        return Err(format!("Instance directory not found at: {:?}", instance_dir));
+    }
+
+    let meta_path = instance_dir.join("fabric_launch_meta.json");
+    if !meta_path.exists() {
+        return Err(
+            "Instance metadata not found. Please sync this profile first before launching."
+                .to_string(),
+        );
+    }
+
+    let meta_content = fs::read_to_string(&meta_path)
+        .map_err(|e| format!("Failed to read fabric_launch_meta.json: {}", e))?;
+    let meta: crate::profiles::FabricLaunchMeta = serde_json::from_str(&meta_content)
+        .map_err(|e| format!("Invalid fabric_launch_meta.json: {}", e))?;
+
+    let refresh_rate = detect_refresh_rate();
+    sanitize_options_txt(instance_dir, refresh_rate);
+
+    let separator = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let classpath = meta.classpath.join(separator);
+    let natives_dir = PathBuf::from(&meta.natives_dir);
+    let _ = fs::create_dir_all(&natives_dir);
+
+    let mut cmd = Command::new(java_bin);
+    cmd.current_dir(instance_dir);
+
+    cmd.arg("-Xms512M");
+    cmd.arg(format!("-Xmx{}G", ram_gb));
+
+    let mut final_jvm_flags: Vec<String> = Vec::new();
+    for flag in custom_jvm_flags.split_whitespace() {
+        if !flag.is_empty() && !final_jvm_flags.iter().any(|f| f == flag) {
+            final_jvm_flags.push(flag.to_string());
+        }
+    }
+
+    let has_gc_flag = final_jvm_flags
+        .iter()
+        .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
+
+    if !has_gc_flag {
+        for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
+            if !final_jvm_flags.iter().any(|f| f == fallback) {
+                final_jvm_flags.push(fallback.to_string());
+            }
+        }
+    }
+
+    for flag in &final_jvm_flags {
+        cmd.arg(flag);
+    }
+
+    cmd.arg(format!("-Djava.library.path={}", natives_dir.to_string_lossy()));
+    cmd.arg(format!("-Djna.tmpdir={}", natives_dir.to_string_lossy()));
+    cmd.arg(format!(
+        "-Dorg.lwjgl.system.SharedLibraryExtractPath={}",
+        natives_dir.to_string_lossy()
+    ));
+    cmd.arg(format!(
+        "-Dio.netty.native.workdir={}",
+        natives_dir.to_string_lossy()
+    ));
+    cmd.arg("-Dminecraft.launcher.brand=CreateClient");
+    cmd.arg("-Dminecraft.launcher.version=1.1.0");
+    cmd.arg("-Djava.net.preferIPv6Addresses=system");
+
+    if cfg!(target_os = "macos") {
+        cmd.arg("-XstartOnFirstThread");
+    }
+
+    cmd.arg("-cp").arg(&classpath);
+    cmd.arg(&meta.main_class);
+
+    let version_type = if meta.loader_version == "vanilla" {
+        "release"
+    } else {
+        "Fabric"
+    };
+
+    cmd.arg("--username").arg(&profile.username);
+    cmd.arg("--version").arg(&meta.mc_version);
+    cmd.arg("--gameDir").arg(instance_dir.to_string_lossy().to_string());
+    cmd.arg("--assetsDir").arg(&meta.assets_dir);
+    cmd.arg("--assetIndex").arg(&meta.asset_index);
+    cmd.arg("--uuid").arg(&profile.uuid);
+    cmd.arg("--accessToken").arg(&profile.access_token);
+    cmd.arg("--clientId").arg(crate::auth::ALLOWLISTED_CLIENT_ID);
+    cmd.arg("--xuid").arg("0");
+    cmd.arg("--userType").arg("msa");
+    cmd.arg("--versionType").arg(version_type);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.stdin(Stdio::null());
+        cmd.process_group(0);
+
+        let current_ld = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+        let new_ld = if current_ld.is_empty() {
+            natives_dir.to_string_lossy().to_string()
+        } else {
+            format!("{}:{}", natives_dir.to_string_lossy(), current_ld)
+        };
+        cmd.env("LD_LIBRARY_PATH", new_ld);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let java_bin_dir = java_bin.parent().unwrap_or(Path::new(""));
+        let new_path = format!(
+            "{};{};{}",
+            natives_dir.to_string_lossy(),
+            java_bin_dir.to_string_lossy(),
+            current_path
+        );
+        cmd.env("PATH", new_path);
+    }
+
+    let log_file_path = instance_dir.join("launcher_log.txt");
+    if let Ok(log_file) = fs::File::create(&log_file_path) {
+        if let Ok(err_file) = log_file.try_clone() {
+            cmd.stdout(Stdio::from(log_file));
+            cmd.stderr(Stdio::from(err_file));
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn Minecraft process: {}", e))?;
+
+    let pid = child.id();
+    MINECRAFT_PID.store(pid, Ordering::SeqCst);
+    IS_MINECRAFT_RUNNING.store(true, Ordering::SeqCst);
+    WAS_FORCE_CLOSED.store(false, Ordering::SeqCst);
+    let app_handle = app.clone();
+    let instance_dir_buf = instance_dir.to_path_buf();
+
+    std::thread::spawn(move || {
+        let _ = app_handle.emit("game-status", true);
+        let wait_res = child.wait();
+        MINECRAFT_PID.store(0, Ordering::SeqCst);
+        IS_MINECRAFT_RUNNING.store(false, Ordering::SeqCst);
+        let _ = app_handle.emit("game-status", false);
+
+        let was_forced = WAS_FORCE_CLOSED.swap(false, Ordering::SeqCst);
+        if !was_forced {
+            if let Ok(exit_status) = wait_res {
+                if !exit_status.success() {
+                    let log_file = instance_dir_buf.join("launcher_log.txt");
                     if let Ok(log_content) = fs::read_to_string(&log_file) {
                         let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
                         let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");

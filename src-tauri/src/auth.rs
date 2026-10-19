@@ -15,6 +15,19 @@ pub struct MinecraftProfile {
     pub expires_at: u64,
 }
 
+impl MinecraftProfile {
+    pub fn redacted_for_frontend(&self) -> Self {
+        Self {
+            uuid: self.uuid.clone(),
+            username: self.username.clone(),
+            skin_url: self.skin_url.clone(),
+            access_token: String::new(),
+            refresh_token: String::new(),
+            expires_at: self.expires_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthStatus {
     pub is_authenticated: bool,
@@ -34,9 +47,20 @@ fn get_auth_file_path() -> std::path::PathBuf {
     crate::config::get_config_dir().join("auth.json")
 }
 
+fn tighten_auth_file_permissions(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.exists() {
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
 pub fn load_saved_profile() -> Option<MinecraftProfile> {
     let path = get_auth_file_path();
     if path.exists() {
+        tighten_auth_file_permissions(&path);
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(profile) = serde_json::from_str::<MinecraftProfile>(&content) {
                 return Some(profile);
@@ -49,7 +73,8 @@ pub fn load_saved_profile() -> Option<MinecraftProfile> {
 pub fn save_profile(profile: &MinecraftProfile) -> Result<(), String> {
     let path = get_auth_file_path();
     let data = serde_json::to_string_pretty(profile).map_err(|e| e.to_string())?;
-    fs::write(path, data).map_err(|e| e.to_string())?;
+    fs::write(&path, data).map_err(|e| e.to_string())?;
+    tighten_auth_file_permissions(&path);
     Ok(())
 }
 
@@ -428,6 +453,6 @@ async fn authenticate_with_ms_token(
         expires_at: now_sec + mc_login.expires_in,
     };
 
-    let _ = save_profile(&profile);
+    save_profile(&profile)?;
     Ok(profile)
 }

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-pub const CURRENT_VERSION: &str = "1.0.9";
+pub const CURRENT_VERSION: &str = "1.1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientUpdateInfo {
@@ -33,7 +33,7 @@ struct GitHubAsset {
 
 pub async fn check_for_update() -> Result<ClientUpdateInfo, String> {
     let client = reqwest::Client::new();
-    let url = "https://api.github.com/repos/JaviDaBomb/Create-Client/releases/latest";
+    let url = "https://api.github.com/repos/Varixxl/Create-Client/releases/latest";
 
     let res = client
         .get(url)
@@ -49,7 +49,7 @@ pub async fn check_for_update() -> Result<ClientUpdateInfo, String> {
             latest_version: CURRENT_VERSION.to_string(),
             download_url: None,
             asset_name: None,
-            release_url: "https://github.com/JaviDaBomb/Create-Client/releases".to_string(),
+            release_url: "https://github.com/Varixxl/Create-Client/releases".to_string(),
             changelog: None,
         });
     }
@@ -87,11 +87,19 @@ fn find_matching_asset<'a>(assets: &'a [GitHubAsset]) -> Option<&'a GitHubAsset>
     }
     #[cfg(target_os = "linux")]
     {
+        // Prioritize raw standalone binary or AppImage first
+        if let Some(raw_bin) = assets.iter().find(|a| {
+            let n = a.name.to_lowercase();
+            n == "create-client" || n.ends_with(".appimage")
+        }) {
+            return Some(raw_bin);
+        }
+
+        // Fall back to .tar.gz archive if standalone binary asset is not present
         assets.iter().find(|a| {
             let n = a.name.to_lowercase();
-            n == "create-client"
-                || n.starts_with("create-client-linux")
-                || n.ends_with(".appimage")
+            n.starts_with("create-client-linux")
+                || (n.starts_with("create-client-") && n.ends_with(".tar.gz"))
                 || n == "create-client.tar.gz"
         })
     }
@@ -101,7 +109,53 @@ fn find_matching_asset<'a>(assets: &'a [GitHubAsset]) -> Option<&'a GitHubAsset>
     }
 }
 
+fn validate_update_url(download_url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(download_url)
+        .map_err(|e| format!("Invalid update download URL: {}", e))?;
+    if parsed.scheme() != "https" {
+        return Err("Update download URL must use HTTPS".to_string());
+    }
+    let host = parsed.host_str().unwrap_or("");
+    let path = parsed.path().to_lowercase();
+    let is_trusted_github = (host == "github.com"
+        && (path.starts_with("/varixxl/create-client/releases/download/")
+            || path.starts_with("/javidabomb/create-client/releases/download/")))
+        || host == "objects.githubusercontent.com"
+        || host == "release-assets.githubusercontent.com";
+
+    if !is_trusted_github {
+        return Err(format!("Untrusted update host or repository path: {}", download_url));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn extract_binary_from_tar_gz(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let gz = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
+    let mut archive = tar::Archive::new(gz);
+    let entries = archive
+        .entries()
+        .map_err(|e| format!("Failed to read update tar.gz archive: {}", e))?;
+
+    for entry_res in entries {
+        let mut entry = entry_res.map_err(|e| format!("Invalid tar entry: {}", e))?;
+        if let Ok(path) = entry.path() {
+            if path.file_name().and_then(|n| n.to_str()) == Some("create-client") {
+                let mut buf = Vec::new();
+                entry
+                    .read_to_end(&mut buf)
+                    .map_err(|e| format!("Failed to read binary from tar.gz: {}", e))?;
+                return Ok(buf);
+            }
+        }
+    }
+    Err("Could not find 'create-client' binary inside downloaded .tar.gz archive".to_string())
+}
+
 pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<String, String> {
+    validate_update_url(download_url)?;
+
     let client = reqwest::Client::new();
     let res = client
         .get(download_url)
@@ -121,6 +175,18 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
 
     #[cfg(target_os = "linux")]
     {
+        // If the downloaded payload is a gzip tarball (.tar.gz), extract the inner binary first
+        let is_gzip = bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b;
+        let bin_bytes: Vec<u8> = if is_gzip || download_url.to_lowercase().ends_with(".tar.gz") {
+            extract_binary_from_tar_gz(&bytes)?
+        } else {
+            bytes.to_vec()
+        };
+
+        if bin_bytes.len() < 4 || &bin_bytes[0..4] != b"\x7fELF" {
+            return Err("Downloaded update is not a valid Linux ELF executable".to_string());
+        }
+
         let target_path = std::env::current_exe().map_err(|e| e.to_string())?;
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         let bin_path = PathBuf::from(&home).join(".local/bin/create-client");
@@ -131,7 +197,7 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
         };
 
         let tmp_path = actual_target.with_extension("tmp_update");
-        fs::write(&tmp_path, &bytes).map_err(|e| format!("Failed to write update: {}", e))?;
+        fs::write(&tmp_path, &bin_bytes).map_err(|e| format!("Failed to write update: {}", e))?;
 
         #[cfg(unix)]
         {
@@ -155,6 +221,10 @@ pub async fn perform_update(_app: &AppHandle, download_url: &str) -> Result<Stri
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        if bytes.len() < 2 || &bytes[0..2] != b"MZ" {
+            return Err("Downloaded update is not a valid Windows executable".to_string());
+        }
 
         let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let old_exe = current_exe.with_extension("old");

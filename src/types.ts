@@ -70,3 +70,54 @@ export interface ModpackUpdateInfo {
   latest_version: string;
   changelog: string | null;
 }
+
+export interface ModpackProfile {
+  id: string;
+  name: string;
+  description: string;
+  loader: string;
+  mc_version: string;
+  resolved_mc_version?: string | null;
+  loader_version?: string | null;
+  is_builtin: boolean;
+  instance_dir: string;
+  modrinth_slugs: string[];
+  ram_gb?: number | null;
+  jvm_flags?: string | null;
+}
+
+export interface ProfilesState {
+  selected_profile_id: string;
+  profiles: ModpackProfile[];
+}
+
+export interface InstalledModInfo {
+  file_name: string;
+  title: string;
+  slug?: string | null;
+  version_number: string;
+  description: string;
+  icon_url?: string | null;
+  enabled: boolean;
+  size_bytes: number;
+}
+
+export interface ModrinthSearchResult {
+  project_id: string;
+  slug: string;
+  title: string;
+  description: string;
+  author: string;
+  downloads: number;
+  icon_url?: string | null;
+  installed: boolean;
+}
+
+export interface InstanceLogsPayload {
+  log_source: string;
+  lines: string[];
+  crash_report?: string | null;
+}
+
+export type WorkspaceTab = "play" | "mods" | "console";
+

@@ -1,8 +1,14 @@
-import os, sys, json, requests
+import os, sys, json, requests, subprocess
 
 TOKEN = os.environ.get('GITHUB_TOKEN', '')
-REPO = 'JaviDaBomb/Create-Client'
-TAG = 'v1.0.9'
+if not TOKEN:
+    try:
+        TOKEN = subprocess.check_output(['gh', 'auth', 'token']).decode().strip()
+    except Exception:
+        pass
+
+REPO = 'Varixxl/Create-Client'
+TAG = 'v1.1.0'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -14,17 +20,29 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - Persistent Microsoft Session Auto-Refresh & Graphics Presets',
-    'body': """## What's Changed in Create Client v1.0.9
+    'name': f'Create Client {TAG} - Multi-Modpack Profiles, Mod Manager & Live Game Console',
+    'body': """## What's Changed in Create Client v1.1.0
 
-### 🔐 Persistent Microsoft & Minecraft Session Auto-Refresh
-- **Eliminated 24-Hour Re-Login Requirement:** Fixed an OAuth Client ID mismatch during background token refresh so saved sessions renew seamlessly without requiring manual sign-out and sign-in every 24 hours.
-- **Automatic Pre-Launch Token Renewal:** Every game launch now proactively refreshes your Minecraft access token, guaranteeing a full 24-hour session validity window whenever you click **Play Game**.
-- **Continuous Background Refresh & Retry Resilience:** Added automatic 30-minute background session checks while the launcher is open along with multi-attempt retry logic for transient network/DNS hiccups.
+### 📦 Multi-Instance Modpack Profiles & Profile Rail
+- **Custom Modpack Instances:** Create, select, duplicate, edit JVM/RAM overrides, and delete isolated Minecraft profiles directly in Create Client.
+- **Dedicated Directory Isolation:** Each instance maintains its own isolated `mods/`, `config/`, `saves/`, and `options.txt` sandbox.
+- **Pinned Create Server Instance:** The official Create Server profile is permanently pinned and guarded with automated differential delta patch updates.
 
-### ⚡ Graphics Presets Engine & Display Refresh Rate Lock
-- **Low, Medium, and Ultra Presets:** Select your graphics tier directly in Client Settings or let Auto Tier detect your GPU capabilities.
-- **Native Refresh Rate Sync:** Automatically detects your monitor's refresh rate and locks your frame cap to it for tear-free performance.""",
+### ⚡ Built-in Fabric Performance & QoL Pack
+- **Instant Modern Fabric Setup:** Launch clean, high-performance vanilla/Fabric gameplay dynamically linked to the latest stable Minecraft and Fabric Loader versions.
+- **12 Curated Optimization Mods:** Automatically downloads and synchronizes top-tier optimization & quality-of-life mods (`Sodium`, `Lithium`, `FerriteCore`, `ImmediatelyFast`, `EntityCulling`, `Mod Menu`, `Cloth Config`, `Jade`, `AppleSkin`, `Xaero's Minimap`, `Zoomify`, `Fabric API`) via Modrinth's API.
+
+### 🧩 Per-Profile Mod Manager & Modrinth Browser
+- **Direct Mod Control:** View installed mods, toggle `.jar` / `.jar.disabled` states without closing the launcher, and safely delete mods.
+- **Modrinth Search & 1-Click Install:** Browse thousands of compatible Fabric and Forge mods directly inside Create Client with automatic dependency resolution.
+
+### 🖥️ Live Game Console & Crash Inspector
+- **Real-Time Stream:** Inspect game output and log events live while Minecraft is running with ALL, WARN+, and ERROR filters.
+- **Crash Detection & Diagnostics:** Automatically scans for crash reports and stacktraces with 1-click Copy Log.
+
+### 🛡️ Security Hardening & Platform Integrity
+- **Frontend CSP:** Enforced strict Content Security Policy for embedded WebViews.
+- **HTTPS & Binary Verification:** Validates GitHub release endpoints, verifies ELF and PE executable headers, and unpacks Linux tarballs safely.""",
     'draft': False,
     'prerelease': False
 }
@@ -43,9 +61,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.0.9-windows-x64.zip', 'Create-Client-1.0.9-windows-x64.zip', 'application/zip'),
+    ('Create-Client-1.1.0-windows-x64.zip', 'Create-Client-1.1.0-windows-x64.zip', 'application/zip'),
     ('create-client', 'create-client', 'application/octet-stream'),
-    ('create-client-1.0.9-linux-x86_64.tar.gz', 'create-client-1.0.9-linux-x86_64.tar.gz', 'application/gzip')
+    ('create-client-1.1.0-linux-x86_64.tar.gz', 'create-client-1.1.0-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:

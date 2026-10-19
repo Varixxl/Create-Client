@@ -3,11 +3,16 @@ pub mod config;
 pub mod downloader;
 pub mod launcher;
 pub mod pinger;
+pub mod profiles;
 pub mod updater;
 
 use auth::AuthStatus;
 use config::AppConfig;
 use pinger::ServerStatus;
+use profiles::{
+    InstalledModInfo, InstanceLogsPayload, ModrinthSearchResult, ProfilesState,
+    CREATE_SERVER_PROFILE_ID,
+};
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
@@ -22,11 +27,192 @@ fn save_config(config: AppConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_profiles() -> ProfilesState {
+    profiles::load_profiles_state()
+}
+
+#[tauri::command]
+fn select_profile(profile_id: String) -> Result<ProfilesState, String> {
+    profiles::select_profile(&profile_id)
+}
+
+#[tauri::command]
+fn create_profile(
+    name: String,
+    description: String,
+    loader: String,
+    mc_version: String,
+    include_default_fabric_mods: bool,
+    ram_gb: Option<u32>,
+    jvm_flags: Option<String>,
+) -> Result<ProfilesState, String> {
+    profiles::create_profile(
+        name,
+        description,
+        loader,
+        mc_version,
+        include_default_fabric_mods,
+        ram_gb,
+        jvm_flags,
+    )
+}
+
+#[tauri::command]
+fn duplicate_profile(source_id: String, new_name: String) -> Result<ProfilesState, String> {
+    profiles::duplicate_profile(&source_id, new_name)
+}
+
+#[tauri::command]
+fn update_profile(
+    profile_id: String,
+    name: String,
+    description: Option<String>,
+    ram_gb: Option<u32>,
+    jvm_flags: Option<String>,
+) -> Result<ProfilesState, String> {
+    profiles::update_profile(&profile_id, name, description, ram_gb, jvm_flags)
+}
+
+#[tauri::command]
+fn delete_profile(profile_id: String) -> Result<ProfilesState, String> {
+    profiles::delete_profile(&profile_id)
+}
+
+#[tauri::command]
+async fn get_available_mc_versions() -> Result<Vec<String>, String> {
+    profiles::get_available_mc_versions().await
+}
+
+#[tauri::command]
+async fn sync_profile(app: AppHandle, profile_id: String, force_repair: bool) -> Result<String, String> {
+    if profile_id == CREATE_SERVER_PROFILE_ID {
+        return sync_modpack(app, force_repair).await;
+    }
+    profiles::sync_profile_instance(&app, &profile_id, force_repair).await
+}
+
+#[tauri::command]
+async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, String> {
+    let cfg = config::load_config();
+    let state = profiles::load_profiles_state();
+    let target_profile = state
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .cloned()
+        .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
+
+    let effective_ram = target_profile.ram_gb.unwrap_or(cfg.ram_gb);
+    let effective_flags = target_profile
+        .jvm_flags
+        .clone()
+        .unwrap_or_else(|| cfg.jvm_flags.clone());
+
+    if target_profile.id == CREATE_SERVER_PROFILE_ID {
+        let game_dir = PathBuf::from(&cfg.game_dir);
+        let auth_prof = auth::ensure_valid_profile(true)
+            .await
+            .map_err(|e| {
+                format!(
+                    "Session expired and automatic refresh failed ({}). Please sign in again.",
+                    e
+                )
+            })?
+            .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
+
+        let runtime_dir = downloader::get_runtime_dir();
+        let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+        downloader::ensure_libraries(&app, &game_dir).await?;
+        downloader::ensure_assets(&app, &game_dir).await?;
+
+        return launcher::launch_minecraft(
+            &app,
+            &java_bin,
+            &game_dir,
+            &auth_prof,
+            effective_ram,
+            &effective_flags,
+            cfg.auto_connect,
+            &cfg.graphics_preset,
+        );
+    }
+
+    let instance_dir = PathBuf::from(&target_profile.instance_dir);
+    if !instance_dir.join("fabric_launch_meta.json").exists() {
+        profiles::sync_profile_instance(&app, &profile_id, false).await?;
+    }
+
+    let auth_prof = auth::ensure_valid_profile(true)
+        .await
+        .map_err(|e| {
+            format!(
+                "Session expired and automatic refresh failed ({}). Please sign in again.",
+                e
+            )
+        })?
+        .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
+
+    let runtime_dir = downloader::get_runtime_dir();
+    let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+
+    launcher::launch_fabric_or_vanilla(
+        &app,
+        &java_bin,
+        &instance_dir,
+        &auth_prof,
+        effective_ram,
+        &effective_flags,
+    )
+}
+
+#[tauri::command]
+fn list_installed_mods(profile_id: String) -> Result<Vec<InstalledModInfo>, String> {
+    profiles::list_installed_mods(&profile_id)
+}
+
+#[tauri::command]
+fn toggle_mod(profile_id: String, file_name: String, enabled: bool) -> Result<(), String> {
+    profiles::toggle_mod(&profile_id, &file_name, enabled)
+}
+
+#[tauri::command]
+fn remove_mod(profile_id: String, file_name: String) -> Result<(), String> {
+    profiles::remove_mod(&profile_id, &file_name)
+}
+
+#[tauri::command]
+async fn search_modrinth_mods(
+    profile_id: String,
+    query: String,
+) -> Result<Vec<ModrinthSearchResult>, String> {
+    profiles::search_modrinth_mods(&profile_id, query).await
+}
+
+#[tauri::command]
+async fn install_modrinth_mod(
+    app: AppHandle,
+    profile_id: String,
+    slug: String,
+) -> Result<(), String> {
+    profiles::install_modrinth_mod(&app, &profile_id, slug).await
+}
+
+#[tauri::command]
+fn get_instance_logs(profile_id: String, max_lines: usize) -> Result<InstanceLogsPayload, String> {
+    profiles::get_instance_logs(&profile_id, max_lines)
+}
+
+#[tauri::command]
+fn clear_instance_logs(profile_id: String) -> Result<(), String> {
+    profiles::clear_instance_logs(&profile_id)
+}
+
+#[tauri::command]
 async fn get_auth_status() -> AuthStatus {
     match auth::ensure_valid_profile(false).await {
         Ok(Some(profile)) => AuthStatus {
             is_authenticated: true,
-            profile: Some(profile),
+            profile: Some(profile.redacted_for_frontend()),
         },
         _ => AuthStatus {
             is_authenticated: false,
@@ -42,7 +228,8 @@ async fn start_device_login() -> Result<auth::DeviceCodeInfo, String> {
 
 #[tauri::command]
 async fn poll_device_login(device_code: String) -> Result<Option<auth::MinecraftProfile>, String> {
-    auth::poll_device_flow(&device_code).await
+    let profile = auth::poll_device_flow(&device_code).await?;
+    Ok(profile.map(|p| p.redacted_for_frontend()))
 }
 
 #[tauri::command]
@@ -60,24 +247,24 @@ async fn sync_modpack(app: AppHandle, force_repair: bool) -> Result<String, Stri
     let cfg = config::load_config();
     let game_dir = PathBuf::from(&cfg.game_dir);
 
-    // 1. Ensure Adoptium Java 17 JRE
+    // 1. Ensure Azul Zulu 21 JRE
     let runtime_dir = downloader::get_runtime_dir();
     let _ = downloader::ensure_java(&app, &runtime_dir).await?;
 
     // 2. Ensure Minecraft Assets
-    let _ = downloader::ensure_assets(&app, &game_dir).await;
+    downloader::ensure_assets(&app, &game_dir).await?;
 
     // 3. Synchronize modpack files from GitHub release manifest
     let sync_result = if !cfg.release_manifest_url.trim().is_empty() {
-        downloader::check_and_sync_modpack(&app, &game_dir, &cfg.release_manifest_url, force_repair).await
+        downloader::check_and_sync_modpack(&app, &game_dir, &cfg.release_manifest_url, force_repair).await?
     } else {
-        Ok("1.0.0 (Local)".to_string())
+        "1.0.0 (Local)".to_string()
     };
 
     // 4. Ensure all platform-specific libraries & natives from version.json
-    let _ = downloader::ensure_libraries(&app, &game_dir).await;
+    downloader::ensure_libraries(&app, &game_dir).await?;
 
-    sync_result
+    Ok(sync_result)
 }
 
 #[tauri::command]
@@ -91,13 +278,13 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
         .map_err(|e| format!("Session expired and automatic refresh failed ({}). Please sign in again.", e))?
         .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-    // Ensure Java 17
+    // Ensure Java 21
     let runtime_dir = downloader::get_runtime_dir();
     let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
 
     // Ensure all platform-specific libraries, natives, and vanilla assets are present before launching
-    let _ = downloader::ensure_libraries(&app, &game_dir).await;
-    let _ = downloader::ensure_assets(&app, &game_dir).await;
+    downloader::ensure_libraries(&app, &game_dir).await?;
+    downloader::ensure_assets(&app, &game_dir).await?;
 
     // Launch Forge process
     launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect, &cfg.graphics_preset)
@@ -192,7 +379,11 @@ fn open_folder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
-    open::that(url).map_err(|e| e.to_string())
+    let parsed = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
+    match parsed.scheme() {
+        "https" | "http" => open::that(parsed.as_str()).map_err(|e| e.to_string()),
+        scheme => Err(format!("Disallowed URL scheme: {}", scheme)),
+    }
 }
 
 #[tauri::command]
@@ -238,6 +429,22 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
+            get_profiles,
+            select_profile,
+            create_profile,
+            duplicate_profile,
+            update_profile,
+            delete_profile,
+            get_available_mc_versions,
+            sync_profile,
+            launch_profile,
+            list_installed_mods,
+            toggle_mod,
+            remove_mod,
+            search_modrinth_mods,
+            install_modrinth_mod,
+            get_instance_logs,
+            clear_instance_logs,
             get_auth_status,
             start_device_login,
             poll_device_login,

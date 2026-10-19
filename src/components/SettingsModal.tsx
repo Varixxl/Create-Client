@@ -14,7 +14,7 @@ interface SettingsModalProps {
   onResetDefaults: () => Promise<void>;
 }
 
-const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+AlwaysPreTouch";
+const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch";
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -33,18 +33,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [graphicsInfo, setGraphicsInfo] = useState<GraphicsInfo | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      invoke<GraphicsInfo>("get_graphics_info")
-        .then((info) => setGraphicsInfo(info))
-        .catch((err) => console.warn("Failed to fetch graphics info:", err));
-    }
-  }, [isOpen]);
-
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResettingDefaults, setIsResettingDefaults] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setRam(config.ram_gb);
+      setJvmFlags(config.jvm_flags);
+      setGameDir(config.game_dir);
+      setGraphicsPreset(config.graphics_preset || "auto");
+      setIsConfirmingDelete(false);
+
+      invoke<GraphicsInfo>("get_graphics_info")
+        .then((info) => setGraphicsInfo(info))
+        .catch((err) => console.warn("Failed to fetch graphics info:", err));
+    }
+  }, [isOpen, config]);
 
   if (!isOpen) return null;
 

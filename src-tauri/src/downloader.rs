@@ -274,16 +274,103 @@ pub async fn check_modpack_update(game_dir: &Path, manifest_url: &str) -> Result
     })
 }
 
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut s, "{:02x}", b);
+    }
+    s
+}
+
+fn verify_sha256_file(path: &Path, expected_hex: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let expected = expected_hex.trim().to_lowercase();
+    if expected.is_empty() {
+        return Ok(());
+    }
+
+    let mut file = File::open(path).map_err(|e| format!("Failed to open file for SHA-256 check: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("Error reading file for SHA-256 check: {}", e))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let actual = bytes_to_hex(&hasher.finalize());
+    if actual != expected {
+        let _ = fs::remove_file(path);
+        return Err(format!(
+            "SHA-256 checksum mismatch for {:?}: expected {}, got {}",
+            path.file_name().unwrap_or_default(),
+            expected,
+            actual
+        ));
+    }
+    Ok(())
+}
+
+fn verify_sha1_bytes(bytes: &[u8], expected_hex: &str) -> bool {
+    use sha1::{Digest, Sha1};
+    let expected = expected_hex.trim().to_lowercase();
+    if expected.is_empty() {
+        return true;
+    }
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    bytes_to_hex(&hasher.finalize()) == expected
+}
+
 pub fn delete_all_game_data(game_dir: &Path) -> Result<(), String> {
-    if game_dir.exists() {
-        let entries = fs::read_dir(game_dir).map_err(|e| format!("Failed to read game directory: {}", e))?;
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                let _ = fs::remove_dir_all(&p);
-            } else {
-                let _ = fs::remove_file(&p);
-            }
+    if !game_dir.exists() {
+        return Ok(());
+    }
+
+    let canonical = fs::canonicalize(game_dir).unwrap_or_else(|_| game_dir.to_path_buf());
+    if canonical.components().count() <= 2 {
+        return Err("Refusing to delete a root or top-level system directory.".to_string());
+    }
+
+    if let Some(base_dirs) = directories::BaseDirs::new() {
+        let home = fs::canonicalize(base_dirs.home_dir()).unwrap_or_else(|_| base_dirs.home_dir().to_path_buf());
+        if canonical == home {
+            return Err("Refusing to delete user home directory.".to_string());
+        }
+    }
+
+    let dir_name = canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let has_safe_name = dir_name.contains("game")
+        || dir_name.contains("create")
+        || dir_name.contains("minecraft");
+    let has_mc_markers = game_dir.join("client_version.json").exists()
+        || game_dir.join("mods").exists()
+        || game_dir.join("libraries").exists()
+        || game_dir.join("assets").exists()
+        || game_dir.join("version.json").exists();
+
+    if !has_safe_name && !has_mc_markers {
+        return Err(
+            "Refusing to wipe directory: target folder does not appear to be a Create Client game directory."
+                .to_string(),
+        );
+    }
+
+    let entries = fs::read_dir(game_dir).map_err(|e| format!("Failed to read game directory: {}", e))?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            let _ = fs::remove_dir_all(&p);
+        } else {
+            let _ = fs::remove_file(&p);
         }
     }
     Ok(())
@@ -361,6 +448,10 @@ pub async fn check_and_sync_modpack(
         )
         .await?;
 
+        if let Some(expected_sha) = &base_pkg.sha256 {
+            verify_sha256_file(&temp_zip, expected_sha)?;
+        }
+
         let _ = app.emit(
             "download-progress",
             ProgressPayload {
@@ -392,7 +483,11 @@ pub async fn check_and_sync_modpack(
 
                     download_file_with_progress(app, &patch.url, &temp_zip, &task_label).await?;
 
-                    // Delete files specified in patch removal list
+                    if let Some(expected_sha) = &patch.sha256 {
+                        verify_sha256_file(&temp_zip, expected_sha)?;
+                    }
+
+                    // Delete files specified in patch removal list (only after verifying patch integrity)
                     for del_rel in &patch.delete_files {
                         delete_file_safely(game_dir, del_rel);
                     }
@@ -427,6 +522,10 @@ pub async fn check_and_sync_modpack(
                     )
                     .await?;
 
+                    if let Some(expected_sha) = &base_pkg.sha256 {
+                        verify_sha256_file(&temp_zip, expected_sha)?;
+                    }
+
                     extract_modpack_safely(&temp_zip, game_dir)?;
                     let _ = fs::remove_file(&temp_zip);
 
@@ -440,6 +539,10 @@ pub async fn check_and_sync_modpack(
                             let temp_zip = game_dir.join(format!("patch_v{}.zip", patch.to_version));
 
                             download_file_with_progress(app, &patch.url, &temp_zip, &task_label).await?;
+
+                            if let Some(expected_sha) = &patch.sha256 {
+                                verify_sha256_file(&temp_zip, expected_sha)?;
+                            }
 
                             for del_rel in &patch.delete_files {
                                 delete_file_safely(game_dir, del_rel);
@@ -511,8 +614,11 @@ fn find_patch_chain<'a>(
 }
 
 fn delete_file_safely(game_dir: &Path, rel_path: &str) {
-    let normalized = rel_path.trim_start_matches('/').trim_start_matches('\\');
-    if normalized.is_empty() || normalized.contains("..") {
+    let slash_norm = rel_path.replace('\\', "/");
+    let normalized = slash_norm.trim_start_matches('/');
+    if normalized.is_empty()
+        || normalized.split('/').any(|seg| seg == ".." || seg == ".")
+    {
         return;
     }
 
@@ -658,12 +764,13 @@ fn extract_modpack_safely(zip_path: &Path, game_dir: &Path) -> Result<(), String
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| format!("Invalid zip entry {}: {}", i, e))?;
-        let raw_name = entry.name().to_string();
+        let raw_name = entry.name().replace('\\', "/");
+        let norm_name = raw_name.trim_start_matches('/');
         let mangled = entry.mangled_name();
 
         // Check if file is protected
-        let is_protected = protected_files.iter().any(|&pf| raw_name == pf)
-            || protected_prefixes.iter().any(|&pp| raw_name.starts_with(pp));
+        let is_protected = protected_files.iter().any(|&pf| norm_name == pf)
+            || protected_prefixes.iter().any(|&pp| norm_name.starts_with(pp));
 
         let out_path = game_dir.join(mangled);
 
@@ -704,16 +811,21 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
     let _ = fs::create_dir_all(&indexes_dir);
     let _ = fs::create_dir_all(&objects_dir);
 
-    // If index file doesn't exist, download it from Mojang
+    // If index file doesn't exist, download it from Mojang and verify SHA-1
     if !index_file.exists() {
         let client = Client::new();
+        let expected_idx_sha1 = "3d1e8e9cad62f188270564f4bdfd3a79df9be65a";
         if let Ok(res) = client
             .get("https://piston-meta.mojang.com/v1/packages/3d1e8e9cad62f188270564f4bdfd3a79df9be65a/5.json")
             .send()
             .await
         {
-            if let Ok(bytes) = res.bytes().await {
-                let _ = fs::write(&index_file, bytes);
+            if res.status().is_success() {
+                if let Ok(bytes) = res.bytes().await {
+                    if verify_sha1_bytes(&bytes, expected_idx_sha1) {
+                        let _ = fs::write(&index_file, bytes);
+                    }
+                }
             }
         }
     }
@@ -779,7 +891,7 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
     }
 
     // Identify any assets that are still missing from disk
-    let mut missing_objects: Vec<(String, PathBuf, u64)> = Vec::new();
+    let mut missing_objects: Vec<(String, PathBuf, u64, String)> = Vec::new();
     let mut total_missing_bytes: u64 = 0;
 
     for entry in index.objects.values() {
@@ -791,7 +903,7 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
         let dest = objects_dir.join(prefix).join(hash);
         if !dest.exists() {
             let url = format!("https://resources.download.minecraft.net/{}/{}", prefix, hash);
-            missing_objects.push((url, dest, entry.size));
+            missing_objects.push((url, dest, entry.size, hash.clone()));
             total_missing_bytes += entry.size;
         }
     }
@@ -809,14 +921,16 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
     let downloaded_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let total_count = missing_objects.len();
     let completed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let failed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let start_time = Instant::now();
     let last_emit = std::sync::Arc::new(tokio::sync::Mutex::new(Instant::now()));
 
-    let stream = futures_util::stream::iter(missing_objects).map(|(url, dest, size)| {
+    let stream = futures_util::stream::iter(missing_objects).map(|(url, dest, size, expected_hash)| {
         let client = client.clone();
         let app = app.clone();
         let downloaded = downloaded_bytes.clone();
         let completed = completed_count.clone();
+        let failed = failed_count.clone();
         let last_emit = last_emit.clone();
 
         async move {
@@ -824,12 +938,20 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
                 let _ = fs::create_dir_all(parent);
             }
 
+            let mut ok = false;
             if let Ok(res) = client.get(&url).send().await {
                 if res.status().is_success() {
                     if let Ok(bytes) = res.bytes().await {
-                        let _ = fs::write(&dest, bytes);
+                        if verify_sha1_bytes(&bytes, &expected_hash) {
+                            if fs::write(&dest, bytes).is_ok() {
+                                ok = true;
+                            }
+                        }
                     }
                 }
+            }
+            if !ok {
+                failed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
 
             let cur_bytes = downloaded.fetch_add(size, std::sync::atomic::Ordering::Relaxed) + size;
@@ -865,6 +987,14 @@ pub async fn ensure_assets(app: &AppHandle, game_dir: &Path) -> Result<PathBuf, 
     });
 
     stream.buffer_unordered(24).collect::<Vec<()>>().await;
+
+    let failures = failed_count.load(std::sync::atomic::Ordering::Relaxed);
+    if failures > 0 {
+        return Err(format!(
+            "Failed to download or verify {} Minecraft asset file(s). Please check your connection and try again.",
+            failures
+        ));
+    }
 
     let _ = app.emit(
         "download-progress",
@@ -921,10 +1051,17 @@ pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), St
             .and_then(|a| a.url.as_ref())
             .cloned();
 
+        let expected_sha1 = lib
+            .downloads
+            .as_ref()
+            .and_then(|d| d.artifact.as_ref())
+            .and_then(|a| a.sha1.as_ref())
+            .cloned();
+
         if let (Some(rel), Some(url)) = (rel_path, download_url) {
             let full_dest = lib_dir.join(&rel);
             if !full_dest.exists() {
-                missing_libs.push((full_dest, url, rel.contains("natives")));
+                missing_libs.push((full_dest, url, rel.contains("natives"), expected_sha1));
             } else if rel.contains("natives") {
                 extract_natives_from_jar(&full_dest, &natives_dir);
             }
@@ -933,7 +1070,7 @@ pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), St
 
     if !missing_libs.is_empty() {
         let total = missing_libs.len();
-        for (idx, (full_dest, url, is_native)) in missing_libs.into_iter().enumerate() {
+        for (idx, (full_dest, url, is_native, expected_sha1)) in missing_libs.into_iter().enumerate() {
             let _ = app.emit(
                 "download-progress",
                 ProgressPayload {
@@ -949,15 +1086,35 @@ pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), St
                 let _ = fs::create_dir_all(parent);
             }
 
-            if let Ok(res) = client.get(&url).header("User-Agent", "CreateClient-Launcher").send().await {
-                if res.status().is_success() {
-                    if let Ok(bytes) = res.bytes().await {
-                        let _ = fs::write(&full_dest, bytes);
-                        if is_native {
-                            extract_natives_from_jar(&full_dest, &natives_dir);
-                        }
-                    }
+            let res = client
+                .get(&url)
+                .header("User-Agent", "CreateClient-Launcher")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to download library {}: {}", url, e))?;
+
+            if !res.status().is_success() {
+                return Err(format!("Library download failed (HTTP {}): {}", res.status(), url));
+            }
+
+            let bytes = res
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read library bytes from {}: {}", url, e))?;
+
+            if let Some(sha1) = &expected_sha1 {
+                if !verify_sha1_bytes(&bytes, sha1) {
+                    return Err(format!(
+                        "SHA-1 checksum mismatch for downloaded library {:?}",
+                        full_dest.file_name().unwrap_or_default()
+                    ));
                 }
+            }
+
+            fs::write(&full_dest, bytes)
+                .map_err(|e| format!("Failed to write library {:?}: {}", full_dest, e))?;
+            if is_native {
+                extract_natives_from_jar(&full_dest, &natives_dir);
             }
         }
     }
@@ -977,14 +1134,29 @@ pub async fn ensure_libraries(app: &AppHandle, game_dir: &Path) -> Result<(), St
                     speed_bytes_sec: 0,
                 },
             );
+            let expected_client_sha1 = "43db9b498cb67058d2e12d394e6507722e71bb45";
             let client_url = "https://piston-data.mojang.com/v1/objects/43db9b498cb67058d2e12d394e6507722e71bb45/client.jar";
-            if let Ok(res) = client.get(client_url).header("User-Agent", "CreateClient-Launcher").send().await {
-                if res.status().is_success() {
-                    if let Ok(bytes) = res.bytes().await {
-                        let _ = fs::write(&client_jar, bytes);
-                    }
-                }
+            let res = client
+                .get(client_url)
+                .header("User-Agent", "CreateClient-Launcher")
+                .send()
+                .await
+                .map_err(|e| format!("Failed to download Minecraft 1.20.1 client jar: {}", e))?;
+            if !res.status().is_success() {
+                return Err(format!(
+                    "Failed to download Minecraft 1.20.1 client jar (HTTP {})",
+                    res.status()
+                ));
             }
+            let bytes = res
+                .bytes()
+                .await
+                .map_err(|e| format!("Failed to read Minecraft 1.20.1 client jar stream: {}", e))?;
+            if !verify_sha1_bytes(&bytes, expected_client_sha1) {
+                return Err("SHA-1 checksum mismatch for Minecraft 1.20.1 client.jar".to_string());
+            }
+            fs::write(&client_jar, bytes)
+                .map_err(|e| format!("Failed to write 1.20.1.jar: {}", e))?;
         }
     }
 

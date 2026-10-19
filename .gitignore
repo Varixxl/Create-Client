@@ -29,6 +29,7 @@ dist-modpack
 .github/
 
 # Release archives and binaries
+/create-client
 *.exe
 *.tar.gz
 *.AppImage

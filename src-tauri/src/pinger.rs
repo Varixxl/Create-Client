@@ -121,14 +121,20 @@ async fn ping_minecraft_server() -> Result<ServerStatus, String> {
         .map_err(|e| format!("Status request write failed: {}", e))?;
 
     // 3. Read Status Response
-    let _packet_len = read_varint(&mut stream).await?;
+    let packet_len = read_varint(&mut stream).await?;
+    if packet_len <= 0 || packet_len > 65536 {
+        return Err(format!("Invalid SLP packet length: {}", packet_len));
+    }
     let packet_id = read_varint(&mut stream).await?;
     if packet_id != 0x00 {
         return Err(format!("Unexpected packet ID: {}", packet_id));
     }
 
-    let json_len = read_varint(&mut stream).await? as usize;
-    let mut json_buf = vec![0u8; json_len];
+    let json_len = read_varint(&mut stream).await?;
+    if json_len <= 0 || json_len > 65536 {
+        return Err(format!("Invalid SLP JSON length: {}", json_len));
+    }
+    let mut json_buf = vec![0u8; json_len as usize];
     stream
         .read_exact(&mut json_buf)
         .await

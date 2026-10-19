@@ -19,7 +19,7 @@ fn default_graphics_preset() -> String {
 }
 
 pub const DEFAULT_AZURE_CLIENT_ID: &str = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb";
-pub const DEFAULT_JVM_FLAGS: &str = "-XX:+UseZGC -XX:+AlwaysPreTouch";
+pub const DEFAULT_JVM_FLAGS: &str = "-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch";
 
 impl Default for AppConfig {
     fn default() -> Self {
@@ -77,8 +77,10 @@ pub fn load_config() -> AppConfig {
                     config.release_manifest_url = "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string();
                     changed = true;
                 }
-                // Automatic migration: switch old G1GC defaults to ZGC
-                if config.jvm_flags.contains("UseG1GC") {
+                // Automatic migration: switch old defaults to Generational ZGC
+                if config.jvm_flags.contains("UseG1GC")
+                    || config.jvm_flags.trim() == "-XX:+UseZGC -XX:+AlwaysPreTouch"
+                {
                     config.jvm_flags = DEFAULT_JVM_FLAGS.to_string();
                     changed = true;
                 }

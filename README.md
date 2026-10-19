@@ -12,18 +12,16 @@ A standalone, zero-dependency, one-click launcher for the **Create Server** modp
 
 ## 📥 Download Create Client
 
-Download the latest release (**v1.0.9**) for your operating system:
+Download the latest release (**v1.1.0**) for your operating system:
 
 | Platform | Format | Direct Download | Installation & Notes |
 | :--- | :--- | :--- | :--- |
-| **Windows 10 / 11** | Standalone Executable (`.exe`) | [**Create-Client.exe**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/Create-Client.exe) | **1-Click Launch.** No installer needed; double-click to run. |
-| **Windows 10 / 11** | Portable ZIP Archive (`.zip`) | [**Create-Client-1.0.9-windows-x64.zip**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/Create-Client-1.0.9-windows-x64.zip) | Portable bundle with quick-start instructions. |
-| **Linux (Universal)** | Standalone AppImage (`.AppImage`) | [**Create-Client-1.0.9.AppImage**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/Create-Client-1.0.9.AppImage) | **Self-contained.** Bundles WebKitGTK and dependencies. Works on Arch, Ubuntu, Fedora, Debian, Mint. Run `chmod +x` and double-click. |
-| **Linux (Arch / Any)** | Portable Tarball (`.tar.gz`) | [**create-client-1.0.9-linux-x86_64.tar.gz**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/create-client-1.0.9-linux-x86_64.tar.gz) | Includes automated `./install.sh` script, icon, and desktop launcher. |
-| **Ubuntu / Debian** | Debian Package (`.deb`) | [**create-client_1.0.9_amd64.deb**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/create-client_1.0.9_amd64.deb) | Install with `sudo dpkg -i create-client_1.0.9_amd64.deb` or Software Center. |
-| **Fedora / RHEL** | RPM Package (`.rpm`) | [**create-client-1.0.9-1.x86_64.rpm**](https://github.com/JaviDaBomb/Create-Client/releases/download/v1.0.9/create-client-1.0.9-1.x86_64.rpm) | Install with `sudo dnf install ./create-client-1.0.9-1.x86_64.rpm`. |
+| **Windows 10 / 11** | Standalone Executable (`.exe`) | [**Create-Client.exe**](https://github.com/Varixxl/Create-Client/releases/download/v1.1.0/Create-Client.exe) | **1-Click Launch.** No installer needed; double-click to run. |
+| **Windows 10 / 11** | Portable ZIP Archive (`.zip`) | [**Create-Client-1.1.0-windows-x64.zip**](https://github.com/Varixxl/Create-Client/releases/download/v1.1.0/Create-Client-1.1.0-windows-x64.zip) | Portable bundle with quick-start instructions. |
+| **Linux (Arch / Universal)** | Portable Tarball (`.tar.gz`) | [**create-client-1.1.0-linux-x86_64.tar.gz**](https://github.com/Varixxl/Create-Client/releases/download/v1.1.0/create-client-1.1.0-linux-x86_64.tar.gz) | Includes automated `./install.sh` script, icon, and desktop launcher. |
+| **Linux (Direct Binary)** | Standalone Executable | [**create-client**](https://github.com/Varixxl/Create-Client/releases/download/v1.1.0/create-client) | Run `chmod +x create-client` and launch directly. |
 
-All downloads and checksums are also hosted on the [GitHub Releases page](https://github.com/JaviDaBomb/Create-Client/releases/latest).
+All downloads and checksums are also hosted on the [GitHub Releases page](https://github.com/Varixxl/Create-Client/releases/latest).
 
 ---
 

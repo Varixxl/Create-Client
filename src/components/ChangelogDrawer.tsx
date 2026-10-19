@@ -93,8 +93,17 @@ export const ChangelogDrawer: React.FC<ChangelogDrawerProps> = ({
     );
   };
 
+  const escapeHtml = (unsafe: string): string => {
+    return unsafe
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  };
+
   const formatInlineMarkdown = (text: string): string => {
-    return text
+    return escapeHtml(text)
       .replace(/\*\*(.*?)\*\*/g, "<strong class='text-[#e4e8ee] font-semibold'>$1</strong>")
       .replace(/`([^`]+)`/g, "<code class='px-1.5 py-0.5 rounded bg-[#182232] text-[#5ce1e6] font-mono text-[10.5px] border border-[#263042]'>$1</code>")
       .replace(/\*([^*]+)\*/g, "<em class='text-[#8fa0bc]'>$1</em>");
