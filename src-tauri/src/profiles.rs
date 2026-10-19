@@ -59,6 +59,8 @@ pub struct ModpackProfile {
 pub struct ProfilesState {
     pub selected_profile_id: String,
     pub profiles: Vec<ModpackProfile>,
+    #[serde(default)]
+    pub deleted_builtin_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,43 +299,49 @@ pub fn load_profiles_state() -> ProfilesState {
             .unwrap_or_else(|| ProfilesState {
                 selected_profile_id: CREATE_SERVER_PROFILE_ID.to_string(),
                 profiles: Vec::new(),
+                deleted_builtin_ids: Vec::new(),
             })
     } else {
         ProfilesState {
             selected_profile_id: CREATE_SERVER_PROFILE_ID.to_string(),
             profiles: Vec::new(),
+            deleted_builtin_ids: Vec::new(),
         }
     };
 
-    // Ensure built-in Create Server profile exists and reflects current cfg.game_dir
-    if let Some(create_prof) = state
-        .profiles
-        .iter_mut()
-        .find(|p| p.id == CREATE_SERVER_PROFILE_ID)
-    {
-        create_prof.instance_dir = cfg.game_dir.clone();
-        create_prof.is_builtin = true;
-        if create_prof.java_version.is_none() {
-            create_prof.java_version = Some(17);
+    // Ensure built-in Create Server profile exists ONLY if user hasn't explicitly deleted it
+    if !state.deleted_builtin_ids.contains(&CREATE_SERVER_PROFILE_ID.to_string()) {
+        if let Some(create_prof) = state
+            .profiles
+            .iter_mut()
+            .find(|p| p.id == CREATE_SERVER_PROFILE_ID)
+        {
+            create_prof.instance_dir = cfg.game_dir.clone();
+            create_prof.is_builtin = true;
+            if create_prof.java_version.is_none() {
+                create_prof.java_version = Some(17);
+            }
+        } else {
+            state.profiles.insert(0, build_builtin_create_profile(&cfg));
         }
-    } else {
-        state.profiles.insert(0, build_builtin_create_profile(&cfg));
     }
 
-    // Ensure built-in Fabric Performance & QoL profile exists
-    if let Some(fab_prof) = state
-        .profiles
-        .iter_mut()
-        .find(|p| p.id == FABRIC_DEFAULT_PROFILE_ID)
-    {
-        if fab_prof.java_version.is_none() {
-            fab_prof.java_version = Some(25);
-        }
-    } else {
-        let insert_idx = if state.profiles.is_empty() { 0 } else { 1 };
-        state
+    // Ensure built-in Fabric Performance & QoL profile exists ONLY if user hasn't explicitly deleted it
+    if !state.deleted_builtin_ids.contains(&FABRIC_DEFAULT_PROFILE_ID.to_string()) {
+        if let Some(fab_prof) = state
             .profiles
-            .insert(insert_idx, build_builtin_fabric_profile());
+            .iter_mut()
+            .find(|p| p.id == FABRIC_DEFAULT_PROFILE_ID)
+        {
+            if fab_prof.java_version.is_none() {
+                fab_prof.java_version = Some(25);
+            }
+        } else {
+            let insert_idx = if state.profiles.is_empty() { 0 } else { 1.min(state.profiles.len()) };
+            state
+                .profiles
+                .insert(insert_idx, build_builtin_fabric_profile());
+        }
     }
 
     // Guarantee that every single profile in state has a concrete, compatible java_version
@@ -351,7 +359,11 @@ pub fn load_profiles_state() -> ProfilesState {
         .iter()
         .any(|p| p.id == state.selected_profile_id)
     {
-        state.selected_profile_id = CREATE_SERVER_PROFILE_ID.to_string();
+        if let Some(first) = state.profiles.first() {
+            state.selected_profile_id = first.id.clone();
+        } else {
+            state.selected_profile_id = String::new();
+        }
     }
 
     let _ = save_profiles_state(&state);
@@ -606,13 +618,11 @@ pub fn update_profile(
         .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
 
     let trimmed = name.trim();
-    if !trimmed.is_empty() && !prof.is_builtin {
+    if !trimmed.is_empty() {
         prof.name = trimmed.to_string();
     }
     if let Some(desc) = description {
-        if !desc.trim().is_empty() && !prof.is_builtin {
-            prof.description = desc.trim().to_string();
-        }
+        prof.description = desc.trim().to_string();
     }
     prof.ram_gb = ram_gb;
     prof.jvm_flags = jvm_flags.filter(|s| !s.trim().is_empty());
@@ -634,10 +644,6 @@ pub fn update_profile(
 }
 
 pub fn delete_profile(profile_id: &str) -> Result<ProfilesState, String> {
-    if profile_id == CREATE_SERVER_PROFILE_ID {
-        return Err("Cannot delete the official Create Server profile.".to_string());
-    }
-
     let mut state = load_profiles_state();
     let target = state
         .profiles
@@ -652,21 +658,24 @@ pub fn delete_profile(profile_id: &str) -> Result<ProfilesState, String> {
         let _ = fs::remove_dir_all(&dir_path);
     }
 
-    if target.is_builtin {
-        // For the built-in Fabric profile, reset its instance state cleanly
-        if let Some(p) = state.profiles.iter_mut().find(|p| p.id == profile_id) {
-            *p = build_builtin_fabric_profile();
+    if target.is_builtin || profile_id == CREATE_SERVER_PROFILE_ID || profile_id == FABRIC_DEFAULT_PROFILE_ID {
+        if !state.deleted_builtin_ids.contains(&profile_id.to_string()) {
+            state.deleted_builtin_ids.push(profile_id.to_string());
         }
-    } else {
-        state.profiles.retain(|p| p.id != profile_id);
     }
+
+    state.profiles.retain(|p| p.id != profile_id);
 
     if !state
         .profiles
         .iter()
         .any(|p| p.id == state.selected_profile_id)
     {
-        state.selected_profile_id = CREATE_SERVER_PROFILE_ID.to_string();
+        if let Some(first) = state.profiles.first() {
+            state.selected_profile_id = first.id.clone();
+        } else {
+            state.selected_profile_id = String::new();
+        }
     }
 
     save_profiles_state(&state)?;
@@ -690,6 +699,8 @@ struct ModrinthVersion {
     project_id: String,
     version_number: String,
     game_versions: Vec<String>,
+    #[serde(default)]
+    loaders: Vec<String>,
     files: Vec<ModrinthFile>,
     #[serde(default)]
     dependencies: Vec<ModrinthDependency>,
@@ -752,7 +763,7 @@ fn url_encode(input: &str) -> String {
 
 fn build_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("CreateClient/1.2.2 (https://github.com/Varixxl/create-client)")
+        .user_agent("CreateClient/1.2.3 (https://github.com/Varixxl/create-client)")
         .timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| format!("Failed to initialize HTTP client: {}", e))
@@ -1949,6 +1960,23 @@ pub fn remove_content(profile_id: &str, content_type: &str, file_name: &str) -> 
     Ok(())
 }
 
+pub fn resolve_profile_target_mc(profile: Option<&ModpackProfile>, explicit_mc: Option<String>) -> String {
+    if let Some(m) = explicit_mc.filter(|v| v != "latest" && !v.is_empty()) {
+        return m;
+    }
+    if let Some(p) = profile {
+        if let Some(ref r) = p.resolved_mc_version {
+            if r != "latest" && !r.is_empty() {
+                return r.clone();
+            }
+        }
+        if p.mc_version != "latest" && !p.mc_version.is_empty() {
+            return p.mc_version.clone();
+        }
+    }
+    "1.21.4".to_string()
+}
+
 pub async fn search_content(
     query: String,
     content_type: String,
@@ -1965,10 +1993,7 @@ pub async fn search_content(
         .find(|p| p.id == profile_id)
         .cloned();
 
-    let resolved_mc = mc_version
-        .or_else(|| profile.as_ref().and_then(|p| p.resolved_mc_version.clone()))
-        .or_else(|| profile.as_ref().map(|p| p.mc_version.clone()))
-        .filter(|v| v != "latest" && !v.is_empty());
+    let target_mc = resolve_profile_target_mc(profile.as_ref(), mc_version);
 
     let resolved_loader = loader
         .or_else(|| profile.as_ref().map(|p| p.loader.clone()))
@@ -1993,6 +2018,11 @@ pub async fn search_content(
     let c_type = content_type.to_lowercase();
     let src = source.to_lowercase();
 
+    // Vanilla profiles cannot run mods
+    if (c_type == "mod" || c_type == "mods") && resolved_loader.eq_ignore_ascii_case("vanilla") {
+        return Ok(Vec::new());
+    }
+
     if src == "curseforge" {
         let key = curseforge_key
             .filter(|k| !k.trim().is_empty())
@@ -2013,9 +2043,7 @@ pub async fn search_content(
         if !query.trim().is_empty() {
             url.push_str(&format!("&searchFilter={}", url_encode(query.trim())));
         }
-        if let Some(ref ver) = resolved_mc {
-            url.push_str(&format!("&gameVersion={}", url_encode(ver)));
-        }
+        url.push_str(&format!("&gameVersion={}", url_encode(&target_mc)));
         if class_id == 6 {
             let loader_type = match resolved_loader.as_str() {
                 "forge" => Some(1),
@@ -2085,11 +2113,22 @@ pub async fn search_content(
         };
 
         let mut facets_arr = vec![format!("[\"project_type:{}\"]", project_type)];
-        if let Some(ref ver) = resolved_mc {
-            facets_arr.push(format!("[\"versions:{}\"]", ver));
-        }
-        if project_type == "mod" && resolved_loader != "vanilla" {
-            facets_arr.push(format!("[\"categories:{}\"]", resolved_loader));
+        facets_arr.push(format!("[\"versions:{}\"]", target_mc));
+
+        if project_type == "mod" {
+            match resolved_loader.as_str() {
+                "quilt" => facets_arr.push("[\"categories:quilt\",\"categories:fabric\"]".to_string()),
+                "fabric" => facets_arr.push("[\"categories:fabric\"]".to_string()),
+                "forge" => facets_arr.push("[\"categories:forge\"]".to_string()),
+                "neoforge" => {
+                    if target_mc == "1.20.1" {
+                        facets_arr.push("[\"categories:neoforge\",\"categories:forge\"]".to_string());
+                    } else {
+                        facets_arr.push("[\"categories:neoforge\"]".to_string());
+                    }
+                }
+                l => facets_arr.push(format!("[\"categories:{}\"]", l)),
+            }
         }
         let facets_str = format!("[{}]", facets_arr.join(","));
 
@@ -2160,17 +2199,21 @@ pub async fn install_content(
         .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
 
     let profile = state.profiles[prof_idx].clone();
+    let is_mod = matches!(content_type.to_lowercase().as_str(), "mod" | "mods");
+
+    // Guard: Vanilla profiles cannot run mods
+    if is_mod && profile.loader.eq_ignore_ascii_case("vanilla") {
+        return Err(format!(
+            "Cannot install mod into '{}': Vanilla Minecraft does not support mods. Please create or switch to a Forge, Fabric, Quilt, or NeoForge profile.",
+            profile.name
+        ));
+    }
+
     let client = build_http_client()?;
-    let mc_ver = match &profile.resolved_mc_version {
-        Some(v) => v.clone(),
-        None if profile.mc_version != "latest" => profile.mc_version.clone(),
-        None => "1.20.1".to_string(),
-    };
+    let mc_ver = resolve_profile_target_mc(Some(&profile), None);
 
     let target_dir = get_content_dir(&profile.instance_dir, content_type);
     fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
-
-    let is_mod = matches!(content_type.to_lowercase().as_str(), "mod" | "mods");
 
     if source.eq_ignore_ascii_case("curseforge") {
         let key = curseforge_key
@@ -2192,17 +2235,40 @@ pub async fn install_content(
             .as_array()
             .ok_or_else(|| "No files found for CurseForge project".to_string())?;
 
-        let chosen_file = files
-            .iter()
-            .find(|f| {
-                if let Some(arr) = f["gameVersions"].as_array() {
-                    arr.iter().any(|v| v.as_str() == Some(&mc_ver))
-                } else {
-                    false
+        // Strict compatibility matching for CurseForge files
+        let compatible_file = files.iter().find(|f| {
+            let gv = match f["gameVersions"].as_array() {
+                Some(arr) => arr,
+                None => return false,
+            };
+            let has_mc = gv.iter().any(|v| v.as_str() == Some(&mc_ver));
+            if !has_mc {
+                return false;
+            }
+            if is_mod {
+                let has_loader = gv.iter().any(|v| {
+                    let s = v.as_str().unwrap_or("");
+                    match profile.loader.as_str() {
+                        "fabric" => s.eq_ignore_ascii_case("fabric"),
+                        "quilt" => s.eq_ignore_ascii_case("quilt") || s.eq_ignore_ascii_case("fabric"),
+                        "forge" => s.eq_ignore_ascii_case("forge"),
+                        "neoforge" => s.eq_ignore_ascii_case("neoforge") || (mc_ver == "1.20.1" && s.eq_ignore_ascii_case("forge")),
+                        _ => false,
+                    }
+                });
+                if !has_loader {
+                    return false;
                 }
-            })
-            .or_else(|| files.first())
-            .ok_or_else(|| "No compatible file found on CurseForge".to_string())?;
+            }
+            true
+        });
+
+        let chosen_file = compatible_file.ok_or_else(|| {
+            format!(
+                "Cannot install '{}': Incompatible with profile '{}'. No CurseForge file matches Minecraft {} ({}).",
+                project_id, profile.name, mc_ver, profile.loader.to_uppercase()
+            )
+        })?;
 
         let file_id = chosen_file["id"].as_u64().unwrap_or(0);
         let file_name = chosen_file["fileName"]
@@ -2238,31 +2304,50 @@ pub async fn install_content(
 
         Ok(file_name.to_string())
     } else {
-        // Modrinth install
+        // Modrinth install with strict compatibility
         let mut ver_url = format!("https://api.modrinth.com/v2/project/{}/version?", project_id);
         if is_mod && profile.loader != "vanilla" {
-            ver_url.push_str(&format!("loaders=%5B%22{}%22%5D&", profile.loader));
+            let loaders_param = match profile.loader.as_str() {
+                "quilt" => "%5B%22quilt%22%2C%22fabric%22%5D",
+                "fabric" => "%5B%22fabric%22%5D",
+                "forge" => "%5B%22forge%22%5D",
+                "neoforge" => {
+                    if mc_ver == "1.20.1" {
+                        "%5B%22neoforge%22%2C%22forge%22%5D"
+                    } else {
+                        "%5B%22neoforge%22%5D"
+                    }
+                }
+                l => &format!("%5B%22{}%22%5D", url_encode(l)),
+            };
+            ver_url.push_str(&format!("loaders={}&", loaders_param));
         }
-        ver_url.push_str(&format!("game_versions=%5B%22{}%22%5D", mc_ver));
+        ver_url.push_str(&format!("game_versions=%5B%22{}%22%5D", url_encode(&mc_ver)));
 
         let versions_resp = client.get(&ver_url).send().await;
-        let mut vers: Vec<ModrinthVersion> = match versions_resp {
+        let vers: Vec<ModrinthVersion> = match versions_resp {
             Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
             _ => Vec::new(),
         };
 
-        if vers.is_empty() {
-            let fallback_url = format!("https://api.modrinth.com/v2/project/{}/version", project_id);
-            if let Ok(r) = client.get(&fallback_url).send().await {
-                if r.status().is_success() {
-                    vers = r.json().await.unwrap_or_default();
-                }
-            }
-        }
+        let compatible_ver = vers.into_iter().find(|v| {
+            let mc_match = v.game_versions.contains(&mc_ver);
+            let loader_match = !is_mod || match profile.loader.as_str() {
+                "fabric" => v.loaders.iter().any(|l| l.eq_ignore_ascii_case("fabric")),
+                "quilt" => v.loaders.iter().any(|l| l.eq_ignore_ascii_case("quilt") || l.eq_ignore_ascii_case("fabric")),
+                "forge" => v.loaders.iter().any(|l| l.eq_ignore_ascii_case("forge")),
+                "neoforge" => v.loaders.iter().any(|l| l.eq_ignore_ascii_case("neoforge") || (mc_ver == "1.20.1" && l.eq_ignore_ascii_case("forge"))),
+                _ => false,
+            };
+            mc_match && loader_match
+        });
 
-        let chosen_ver = vers
-            .first()
-            .ok_or_else(|| format!("No compatible Modrinth version found for project '{}'", project_id))?;
+        let chosen_ver = compatible_ver.ok_or_else(|| {
+            format!(
+                "Cannot install '{}': Incompatible with profile '{}'. No Modrinth version matches Minecraft {} ({}).",
+                project_id, profile.name, mc_ver, profile.loader.to_uppercase()
+            )
+        })?;
 
         let primary_file = chosen_ver
             .files

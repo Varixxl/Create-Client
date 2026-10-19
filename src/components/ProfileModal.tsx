@@ -219,16 +219,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              disabled={mode === "edit" && targetProfile?.is_builtin}
               placeholder="e.g., Survival Fabric 1.21 or Builder Pack"
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none disabled:opacity-60"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none"
               required
             />
-            {mode === "edit" && targetProfile?.is_builtin && (
-              <p className="text-[11px] text-[#8fa0bc]">
-                Built-in profile names are pinned, but you can customize RAM and JVM overrides below.
-              </p>
-            )}
           </div>
 
           {mode !== "duplicate" && (
@@ -242,9 +236,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  disabled={mode === "edit" && targetProfile?.is_builtin}
                   placeholder="Short note about this modpack instance..."
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none disabled:opacity-60"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none"
                 />
               </div>
 

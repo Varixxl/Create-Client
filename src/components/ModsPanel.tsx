@@ -15,6 +15,8 @@ import {
   Palette,
   Sun,
   Key,
+  AlertTriangle,
+  ShieldCheck,
 } from "lucide-react";
 import {
   InstalledModInfo,
@@ -121,11 +123,12 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
 
     setIsSearching(true);
     try {
+      const targetMc = profile.resolved_mc_version || (profile.mc_version !== "latest" ? profile.mc_version : undefined);
       const results = await invoke<ContentSearchResult[]>("search_content", {
         query: q,
         contentType: cType,
         source: src,
-        mcVersion: profile.mc_version,
+        mcVersion: targetMc,
         loader: profile.loader,
         curseforgeKey: curseforgeApiKey.trim() || null,
         profileId: profile.id,
@@ -376,7 +379,27 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
             />
           </div>
         )}
+
+        {/* Right side: Active Profile Scope Badge */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#090d14] border border-[#232f42] text-[10px] font-mono shrink-0">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#12c3ca]" />
+          <span className="text-[#8fa0bc] hidden sm:inline">Scope:</span>
+          <span className="font-bold text-[#e4e8ee]">{profile.name}</span>
+          <span className="text-[#3a475d]">|</span>
+          <span className="font-bold text-[#f59e0b] uppercase">{profile.loader}</span>
+          <span className="text-[#5ce1e6]">{profile.resolved_mc_version || profile.mc_version}</span>
+        </div>
       </div>
+
+      {/* Vanilla Mod Incompatibility Warning Banner */}
+      {activeView === "browse" && contentType === "mod" && profile.loader.toLowerCase() === "vanilla" && (
+        <div className="p-3 bg-amber-500/10 border-b border-amber-500/30 flex items-center gap-2.5 text-xs text-amber-300">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+          <span>
+            Vanilla Minecraft profiles do not support mods. Create or switch to a Forge, Fabric, Quilt, or NeoForge profile to install mods, or select Resource Packs or Shaders.
+          </span>
+        </div>
+      )}
 
       {/* CurseForge API Key Warning Banner */}
       {activeView === "browse" && contentSource === "curseforge" && !hasCurseForgeKey && (
@@ -565,6 +588,13 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
                       <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5">
                         <Check className="w-3.5 h-3.5" />
                         <span>Installed</span>
+                      </div>
+                    ) : contentType === "mod" && profile.loader.toLowerCase() === "vanilla" ? (
+                      <div
+                        title="Vanilla profiles do not support mod loading"
+                        className="px-3 py-1.5 rounded-xl bg-gray-800/60 border border-gray-700/50 text-gray-400 text-xs font-semibold cursor-not-allowed opacity-60"
+                      >
+                        Incompatible (Vanilla)
                       </div>
                     ) : (
                       <button

@@ -207,15 +207,13 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                     </button>
                   </div>
 
-                  {!p.is_builtin && (
-                    <button
-                      onClick={() => onDeleteProfile(p)}
-                      title="Delete Profile"
-                      className="p-1.5 rounded-lg bg-[#0e121a] hover:bg-rose-950/70 text-[#8fa0bc] hover:text-rose-400 border border-[#263042] hover:border-rose-500/40 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => onDeleteProfile(p)}
+                    title="Delete Profile"
+                    className="p-1.5 rounded-lg bg-[#0e121a] hover:bg-rose-950/70 text-[#8fa0bc] hover:text-rose-400 border border-[#263042] hover:border-rose-500/40 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
                 </div>
               </div>
             );

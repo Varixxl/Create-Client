@@ -91,6 +91,7 @@ export interface ModpackProfile {
 export interface ProfilesState {
   selected_profile_id: string;
   profiles: ModpackProfile[];
+  deleted_builtin_ids?: string[];
 }
 
 export interface InstalledModInfo {
