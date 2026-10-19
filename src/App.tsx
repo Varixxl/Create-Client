@@ -181,6 +181,7 @@ export const App: React.FC = () => {
     includeDefaultFabricMods: boolean;
     ramGb: number | null;
     jvmFlags: string | null;
+    javaVersion?: number | null;
   }) => {
     try {
       const state = await invoke<ProfilesState>("create_profile", {
@@ -192,6 +193,7 @@ export const App: React.FC = () => {
         includeDefaultFabricMods: data.includeDefaultFabricMods,
         ramGb: data.ramGb,
         jvmFlags: data.jvmFlags,
+        javaVersion: data.javaVersion || null,
       });
       setProfilesState(state);
       showToast(`Created profile "${data.name}"!`);
@@ -206,6 +208,7 @@ export const App: React.FC = () => {
     description: string;
     ramGb: number | null;
     jvmFlags: string | null;
+    javaVersion?: number | null;
   }) => {
     try {
       const state = await invoke<ProfilesState>("update_profile", {
@@ -214,6 +217,7 @@ export const App: React.FC = () => {
         description: data.description || null,
         ramGb: data.ramGb,
         jvmFlags: data.jvmFlags,
+        javaVersion: data.javaVersion ?? null,
       });
       setProfilesState(state);
       showToast(`Updated profile "${data.name}".`);

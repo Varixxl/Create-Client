@@ -85,6 +85,7 @@ export interface ModpackProfile {
   modrinth_slugs: string[];
   ram_gb?: number | null;
   jvm_flags?: string | null;
+  java_version?: number | null;
 }
 
 export interface ProfilesState {

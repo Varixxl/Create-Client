@@ -227,6 +227,60 @@ pub fn detect_java_major_version(java_bin: &Path) -> u32 {
     21
 }
 
+pub fn build_compatible_jvm_flags(custom_jvm_flags: &str, java_major: u32) -> Vec<String> {
+    let mut flags: Vec<String> = Vec::new();
+    let tokens: Vec<&str> = custom_jvm_flags.split_whitespace().collect();
+
+    let mut has_gc = false;
+    for token in tokens {
+        if token.is_empty() {
+            continue;
+        }
+
+        // 1. ZGenerational is only supported on Java >= 21
+        if token.contains("ZGenerational") && java_major < 21 {
+            continue;
+        }
+
+        // 2. UseZGC on Java < 21:
+        // On Java 8, ZGC doesn't exist. On Java 17, non-generational ZGC causes latency spikes
+        // and users configured it expecting generational ZGC. Convert to G1GC for Java < 21.
+        if token == "-XX:+UseZGC" && java_major < 21 {
+            if !flags.iter().any(|f| f == "-XX:+UseG1GC") {
+                flags.push("-XX:+UseG1GC".to_string());
+                has_gc = true;
+            }
+            continue;
+        }
+
+        if token.starts_with("-XX:+Use") && token.ends_with("GC") {
+            has_gc = true;
+        }
+
+        if !flags.contains(&token.to_string()) {
+            flags.push(token.to_string());
+        }
+    }
+
+    if !has_gc {
+        if java_major < 21 {
+            for fallback in ["-XX:+UseG1GC", "-XX:+AlwaysPreTouch"] {
+                if !flags.contains(&fallback.to_string()) {
+                    flags.push(fallback.to_string());
+                }
+            }
+        } else {
+            for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
+                if !flags.contains(&fallback.to_string()) {
+                    flags.push(fallback.to_string());
+                }
+            }
+        }
+    }
+
+    flags
+}
+
 pub fn launch_minecraft(
     app: &AppHandle,
     profile_id: &str,
@@ -360,34 +414,9 @@ pub fn launch_minecraft(
     cmd.arg("-Xms512M");
     cmd.arg(format!("-Xmx{}G", ram_gb));
 
-    // Custom JVM flags (deduplicated, with ZGC fallback only if no GC flag is specified)
-    let mut final_jvm_flags: Vec<String> = Vec::new();
-    for flag in custom_jvm_flags.split_whitespace() {
-        if !flag.is_empty() && !final_jvm_flags.iter().any(|f| f == flag) {
-            final_jvm_flags.push(flag.to_string());
-        }
-    }
-
+    // Sanitized, multi-version compatible JVM flags
     let java_major = detect_java_major_version(java_bin);
-    let has_gc_flag = final_jvm_flags
-        .iter()
-        .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
-
-    if !has_gc_flag {
-        if java_major < 21 {
-            for fallback in ["-XX:+UseG1GC", "-XX:+AlwaysPreTouch"] {
-                if !final_jvm_flags.iter().any(|f| f == fallback) {
-                    final_jvm_flags.push(fallback.to_string());
-                }
-            }
-        } else {
-            for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
-                if !final_jvm_flags.iter().any(|f| f == fallback) {
-                    final_jvm_flags.push(fallback.to_string());
-                }
-            }
-        }
-    }
+    let final_jvm_flags = build_compatible_jvm_flags(custom_jvm_flags, java_major);
 
     for flag in &final_jvm_flags {
         cmd.arg(flag);
@@ -405,15 +434,17 @@ pub fn launch_minecraft(
     cmd.arg("-DmergeModules=jna-5.10.0.jar,jna-platform-5.10.0.jar");
     cmd.arg(format!("-DlibraryDirectory={}", lib_dir.to_string_lossy()));
 
-    // Module-path configuration
+    // Module-path configuration (Java 9+)
     if !module_path.is_empty() {
         cmd.arg("-p").arg(&module_path);
-        cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
-        cmd.arg("--add-opens").arg("java.base/java.util.jar=cpw.mods.securejarhandler");
-        cmd.arg("--add-opens").arg("java.base/java.lang.invoke=cpw.mods.securejarhandler");
-        cmd.arg("--add-exports").arg("java.base/sun.security.util=cpw.mods.securejarhandler");
-        cmd.arg("--add-exports").arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
-        cmd.arg("--add-opens").arg("java.base/java.lang.reflect=ALL-UNNAMED");
+        if java_major >= 9 {
+            cmd.arg("--add-modules").arg("ALL-MODULE-PATH");
+            cmd.arg("--add-opens").arg("java.base/java.util.jar=cpw.mods.securejarhandler");
+            cmd.arg("--add-opens").arg("java.base/java.lang.invoke=cpw.mods.securejarhandler");
+            cmd.arg("--add-exports").arg("java.base/sun.security.util=cpw.mods.securejarhandler");
+            cmd.arg("--add-exports").arg("jdk.naming.dns/com.sun.jndi.dns=java.naming");
+            cmd.arg("--add-opens").arg("java.base/java.lang.reflect=ALL-UNNAMED");
+        }
     }
 
     // Classpath
@@ -581,33 +612,8 @@ pub fn launch_fabric_or_vanilla(
     cmd.arg("-Xms512M");
     cmd.arg(format!("-Xmx{}G", ram_gb));
 
-    let mut final_jvm_flags: Vec<String> = Vec::new();
-    for flag in custom_jvm_flags.split_whitespace() {
-        if !flag.is_empty() && !final_jvm_flags.iter().any(|f| f == flag) {
-            final_jvm_flags.push(flag.to_string());
-        }
-    }
-
     let java_major = detect_java_major_version(java_bin);
-    let has_gc_flag = final_jvm_flags
-        .iter()
-        .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
-
-    if !has_gc_flag {
-        if java_major < 21 {
-            for fallback in ["-XX:+UseG1GC", "-XX:+AlwaysPreTouch"] {
-                if !final_jvm_flags.iter().any(|f| f == fallback) {
-                    final_jvm_flags.push(fallback.to_string());
-                }
-            }
-        } else {
-            for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
-                if !final_jvm_flags.iter().any(|f| f == fallback) {
-                    final_jvm_flags.push(fallback.to_string());
-                }
-            }
-        }
-    }
+    let final_jvm_flags = build_compatible_jvm_flags(custom_jvm_flags, java_major);
 
     for flag in &final_jvm_flags {
         cmd.arg(flag);

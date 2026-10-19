@@ -48,6 +48,8 @@ pub struct ModpackProfile {
     pub ram_gb: Option<u32>,
     pub jvm_flags: Option<String>,
     #[serde(default)]
+    pub java_version: Option<u32>,
+    #[serde(default)]
     pub modrinth_slugs: Vec<String>,
     pub created_at: u64,
     pub last_played: Option<u64>,
@@ -250,6 +252,7 @@ fn build_builtin_create_profile(cfg: &config::AppConfig) -> ModpackProfile {
         is_builtin: true,
         ram_gb: None,
         jvm_flags: None,
+        java_version: Some(17),
         modrinth_slugs: Vec::new(),
         created_at: 1700000000,
         last_played: None,
@@ -273,6 +276,7 @@ fn build_builtin_fabric_profile() -> ModpackProfile {
         is_builtin: true,
         ram_gb: None,
         jvm_flags: None,
+        java_version: Some(25),
         modrinth_slugs: DEFAULT_FABRIC_MOD_SLUGS
             .iter()
             .map(|s| s.to_string())
@@ -309,20 +313,37 @@ pub fn load_profiles_state() -> ProfilesState {
     {
         create_prof.instance_dir = cfg.game_dir.clone();
         create_prof.is_builtin = true;
+        if create_prof.java_version.is_none() {
+            create_prof.java_version = Some(17);
+        }
     } else {
         state.profiles.insert(0, build_builtin_create_profile(&cfg));
     }
 
     // Ensure built-in Fabric Performance & QoL profile exists
-    if !state
+    if let Some(fab_prof) = state
         .profiles
-        .iter()
-        .any(|p| p.id == FABRIC_DEFAULT_PROFILE_ID)
+        .iter_mut()
+        .find(|p| p.id == FABRIC_DEFAULT_PROFILE_ID)
     {
+        if fab_prof.java_version.is_none() {
+            fab_prof.java_version = Some(25);
+        }
+    } else {
         let insert_idx = if state.profiles.is_empty() { 0 } else { 1 };
         state
             .profiles
             .insert(insert_idx, build_builtin_fabric_profile());
+    }
+
+    // Guarantee that every single profile in state has a concrete, compatible java_version
+    for p in state.profiles.iter_mut() {
+        if p.java_version.is_none() {
+            let instance_path = PathBuf::from(&p.instance_dir);
+            let target_mc = p.resolved_mc_version.as_deref().unwrap_or(&p.mc_version);
+            let req = crate::downloader::determine_required_java_version(&instance_path, target_mc);
+            p.java_version = Some(req);
+        }
     }
 
     if !state
@@ -384,6 +405,7 @@ pub fn create_profile(
     include_default_mods: bool,
     ram_gb: Option<u32>,
     jvm_flags: Option<String>,
+    java_version: Option<u32>,
 ) -> Result<ProfilesState, String> {
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
@@ -431,6 +453,12 @@ pub fn create_profile(
         mc_version.trim().to_string()
     };
 
+    let min_java = crate::downloader::determine_required_java_version(&instance_path, &target_mc);
+    let resolved_java = match java_version {
+        Some(v) if v > 0 => v.max(min_java),
+        _ => min_java,
+    };
+
     let desc = if description.trim().is_empty() {
         if normalized_loader == "vanilla" {
             format!("Custom Vanilla Minecraft ({}) instance.", target_mc)
@@ -461,6 +489,7 @@ pub fn create_profile(
         is_builtin: false,
         ram_gb,
         jvm_flags: jvm_flags.filter(|s| !s.trim().is_empty()),
+        java_version: Some(resolved_java),
         modrinth_slugs: slugs,
         created_at: now_unix(),
         last_played: None,
@@ -534,6 +563,7 @@ pub fn duplicate_profile(source_id: &str, new_name: String) -> Result<ProfilesSt
         is_builtin: false,
         ram_gb: source.ram_gb,
         jvm_flags: source.jvm_flags.clone(),
+        java_version: source.java_version,
         modrinth_slugs: source.modrinth_slugs.clone(),
         created_at: now_unix(),
         last_played: None,
@@ -566,6 +596,7 @@ pub fn update_profile(
     description: Option<String>,
     ram_gb: Option<u32>,
     jvm_flags: Option<String>,
+    java_version: Option<u32>,
 ) -> Result<ProfilesState, String> {
     let mut state = load_profiles_state();
     let prof = state
@@ -585,6 +616,18 @@ pub fn update_profile(
     }
     prof.ram_gb = ram_gb;
     prof.jvm_flags = jvm_flags.filter(|s| !s.trim().is_empty());
+    if let Some(jv) = java_version {
+        if jv > 0 {
+            let instance_path = PathBuf::from(&prof.instance_dir);
+            let mc = prof.resolved_mc_version.as_deref().unwrap_or(&prof.mc_version);
+            let min_java = crate::downloader::determine_required_java_version(&instance_path, mc);
+            prof.java_version = Some(jv.max(min_java));
+        } else {
+            let instance_path = PathBuf::from(&prof.instance_dir);
+            let mc = prof.resolved_mc_version.as_deref().unwrap_or(&prof.mc_version);
+            prof.java_version = Some(crate::downloader::determine_required_java_version(&instance_path, mc));
+        }
+    }
 
     save_profiles_state(&state)?;
     Ok(state)
@@ -1359,11 +1402,13 @@ pub async fn sync_profile_instance(
     }
 
     // Ensure the exact Java runtime version required by Minecraft and all installed mods
-    let req_java = crate::downloader::determine_required_java_version(&instance_dir, &target_mc);
+    let min_java = crate::downloader::determine_required_java_version(&instance_dir, &target_mc);
+    let effective_java = profile.java_version.unwrap_or(min_java).max(min_java);
     let runtime_dir = crate::downloader::get_runtime_dir();
-    let _ = crate::downloader::ensure_java_version(app, &runtime_dir, req_java).await?;
+    let _ = crate::downloader::ensure_java_version(app, &runtime_dir, effective_java).await?;
 
     // 9. Update profile metadata in profiles.json
+    state.profiles[profile_idx].java_version = Some(effective_java);
     state.profiles[profile_idx].resolved_mc_version = Some(target_mc.clone());
     if profile.loader == "fabric" {
         state.profiles[profile_idx].loader_version = Some(resolved_loader_version.clone());

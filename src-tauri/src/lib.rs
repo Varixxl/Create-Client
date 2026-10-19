@@ -47,6 +47,7 @@ fn create_profile(
     include_default_fabric_mods: bool,
     ram_gb: Option<u32>,
     jvm_flags: Option<String>,
+    java_version: Option<u32>,
 ) -> Result<ProfilesState, String> {
     profiles::create_profile(
         name,
@@ -57,6 +58,7 @@ fn create_profile(
         include_default_fabric_mods,
         ram_gb,
         jvm_flags,
+        java_version,
     )
 }
 
@@ -72,8 +74,9 @@ fn update_profile(
     description: Option<String>,
     ram_gb: Option<u32>,
     jvm_flags: Option<String>,
+    java_version: Option<u32>,
 ) -> Result<ProfilesState, String> {
-    profiles::update_profile(&profile_id, name, description, ram_gb, jvm_flags)
+    profiles::update_profile(&profile_id, name, description, ram_gb, jvm_flags, java_version)
 }
 
 #[tauri::command]
@@ -119,6 +122,8 @@ async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, Strin
         .clone()
         .unwrap_or_else(|| cfg.jvm_flags.clone());
 
+    let runtime_dir = downloader::get_runtime_dir();
+
     if target_profile.id == CREATE_SERVER_PROFILE_ID {
         let game_dir = PathBuf::from(&cfg.game_dir);
         let auth_prof = auth::ensure_valid_profile(true)
@@ -131,7 +136,8 @@ async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, Strin
             })?
             .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-        let java_bin = downloader::ensure_java_for_instance(&app, &game_dir, "1.20.1").await?;
+        let java_ver = target_profile.java_version.unwrap_or(17);
+        let java_bin = downloader::ensure_java_version(&app, &runtime_dir, java_ver).await?;
         downloader::ensure_libraries(&app, &game_dir).await?;
         downloader::ensure_assets(&app, &game_dir).await?;
 
@@ -167,7 +173,9 @@ async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, Strin
         .resolved_mc_version
         .as_deref()
         .unwrap_or(&target_profile.mc_version);
-    let java_bin = downloader::ensure_java_for_instance(&app, &instance_dir, mc_ver).await?;
+    let min_java = downloader::determine_required_java_version(&instance_dir, mc_ver);
+    let target_java = target_profile.java_version.unwrap_or(min_java).max(min_java);
+    let java_bin = downloader::ensure_java_version(&app, &runtime_dir, target_java).await?;
 
     launcher::launch_fabric_or_vanilla(
         &app,
@@ -385,8 +393,9 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
         .map_err(|e| format!("Session expired and automatic refresh failed ({}). Please sign in again.", e))?
         .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-    // Ensure correct Java version for instance
-    let java_bin = downloader::ensure_java_for_instance(&app, &game_dir, "1.20.1").await?;
+    // Ensure correct Java version for instance (Java 17 for Create Server Forge 1.20.1)
+    let runtime_dir = downloader::get_runtime_dir();
+    let java_bin = downloader::ensure_java_version(&app, &runtime_dir, 17).await?;
 
     // Ensure all platform-specific libraries, natives, and vanilla assets are present before launching
     downloader::ensure_libraries(&app, &game_dir).await?;

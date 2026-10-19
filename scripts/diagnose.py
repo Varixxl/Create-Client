@@ -16,7 +16,11 @@ import tarfile
 from pathlib import Path
 
 CLIENT_DATA_DIR = Path(os.path.expanduser("~/.local/share/createclient"))
-CLIENT_CONFIG_DIR = Path(os.path.expanduser("~/.config/createclient"))
+CLIENT_CONFIG_DIR = (
+    Path(os.path.expanduser("~/.config/CreateClient"))
+    if Path(os.path.expanduser("~/.config/CreateClient")).exists()
+    else Path(os.path.expanduser("~/.config/createclient"))
+)
 RUNTIME_DIR = CLIENT_DATA_DIR / "runtime"
 PROFILES_FILE = CLIENT_CONFIG_DIR / "profiles.json"
 
@@ -286,10 +290,13 @@ def main():
             print(f"           ! Instance directory does not exist yet (Not synchronized)")
             continue
 
-        req_java = determine_required_java(instance_dir, mc_ver)
+        profile_java = p.get("java_version")
+        min_java = determine_required_java(instance_dir, mc_ver)
+        req_java = max(profile_java or min_java, min_java)
         has_java = req_java in runtimes
         status_symbol = "✓" if has_java else "✗"
-        print(f"           Java Requirement: Java {req_java} [{status_symbol} {'Installed' if has_java else 'MISSING'}]")
+        assigned_str = f"Java {profile_java}" if profile_java else "Auto"
+        print(f"           Java Version: Java {req_java} (Assigned: {assigned_str}) [{status_symbol} {'Installed' if has_java else 'MISSING'}]")
 
         if not has_java:
             missing_runtimes.add(req_java)

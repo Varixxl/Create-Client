@@ -32,6 +32,7 @@ interface ProfileModalProps {
     includeDefaultFabricMods: boolean;
     ramGb: number | null;
     jvmFlags: string | null;
+    javaVersion?: number | null;
   }) => Promise<void>;
   onSaveEdit: (data: {
     profileId: string;
@@ -39,6 +40,7 @@ interface ProfileModalProps {
     description: string;
     ramGb: number | null;
     jvmFlags: string | null;
+    javaVersion?: number | null;
   }) => Promise<void>;
   onSaveDuplicate: (sourceId: string, newName: string) => Promise<void>;
 }
@@ -66,6 +68,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [ramGb, setRamGb] = useState(defaultRamGb || 6);
   const [useCustomFlags, setUseCustomFlags] = useState(false);
   const [jvmFlags, setJvmFlags] = useState(defaultJvmFlags || "");
+  const [javaVersion, setJavaVersion] = useState<number | null>(null);
   const [mcVersions, setMcVersions] = useState<string[]>([
     "1.21.5",
     "1.21.4",
@@ -101,6 +104,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setRamGb(defaultRamGb || 6);
       setUseCustomFlags(false);
       setJvmFlags(defaultJvmFlags || "");
+      setJavaVersion(null);
     } else if (mode === "edit" && targetProfile) {
       setName(targetProfile.name);
       setDescription(targetProfile.description);
@@ -108,8 +112,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setRamGb(targetProfile.ram_gb ?? defaultRamGb);
       setUseCustomFlags(targetProfile.jvm_flags != null && targetProfile.jvm_flags.trim() !== "");
       setJvmFlags(targetProfile.jvm_flags ?? defaultJvmFlags);
+      setJavaVersion(targetProfile.java_version ?? null);
     } else if (mode === "duplicate" && targetProfile) {
       setName(`${targetProfile.name} (Copy)`);
+      setJavaVersion(targetProfile.java_version ?? null);
     }
   }, [isOpen, mode, targetProfile, defaultRamGb, defaultJvmFlags]);
 
@@ -157,6 +163,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           includeDefaultFabricMods: loader === "fabric" && includeDefaultFabricMods,
           ramGb: useCustomRam ? ramGb : null,
           jvmFlags: useCustomFlags && jvmFlags.trim() ? jvmFlags.trim() : null,
+          javaVersion,
         });
       } else if (mode === "edit" && targetProfile) {
         await onSaveEdit({
@@ -165,6 +172,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           description: description.trim(),
           ramGb: useCustomRam ? ramGb : null,
           jvmFlags: useCustomFlags && jvmFlags.trim() ? jvmFlags.trim() : null,
+          javaVersion,
         });
       } else if (mode === "duplicate" && targetProfile) {
         await onSaveDuplicate(targetProfile.id, name.trim());
@@ -464,6 +472,45 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       className="w-full px-3 py-2 rounded-lg bg-[#0e131d] border border-[#263042] focus:border-[#12c3ca] text-xs font-mono text-[#e4e8ee] outline-none"
                     />
                   )}
+                </div>
+
+                {/* Java Runtime Specification */}
+                <div className="p-3 rounded-xl bg-[#090d14] border border-[#222d3f] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-[#c6d0df] block">
+                      Java Runtime Specification
+                    </label>
+                    {targetProfile?.id === "create-server" ? (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        Forge 1.20.1 (Java 17)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                        Per-Profile Runtime
+                      </span>
+                    )}
+                  </div>
+                  <select
+                    value={javaVersion ?? 0}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setJavaVersion(val === 0 ? null : val);
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#0e131d] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none cursor-pointer font-mono"
+                  >
+                    <option value={0}>Auto-detect Compatible Runtime (Recommended)</option>
+                    <option value={17}>Java 17 (Forge 1.20.1 & Minecraft 1.18 - 1.20.4)</option>
+                    <option value={21}>Java 21 (Minecraft 1.20.5 - 1.21.x)</option>
+                    <option value={25}>Java 25 (Minecraft 26.x+ Snapshots)</option>
+                    <option value={8}>Java 8 (Legacy Minecraft 1.7 - 1.16.5)</option>
+                  </select>
+                  <p className="text-[11px] text-[#8fa0bc] leading-relaxed">
+                    {javaVersion === 17 || (!javaVersion && (mcVersion === "1.20.1" || targetProfile?.id === "create-server"))
+                      ? "Java 17 runtime selected: Optimized G1GC enabled. Incompatible Generational ZGC (-XX:+ZGenerational) is automatically omitted."
+                      : (javaVersion === 21 || javaVersion === 25 || (!javaVersion && (mcVersion.startsWith("1.21") || mcVersion.startsWith("26."))))
+                      ? "Modern Java runtime selected: Full Generational ZGC enabled for ultra-low latency."
+                      : "Managed Adoptium / Azul OpenJDK runtime provisioned automatically for this instance."}
+                  </p>
                 </div>
               </div>
             </>

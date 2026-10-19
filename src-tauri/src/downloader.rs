@@ -120,8 +120,20 @@ pub fn determine_required_java_version(instance_dir: &Path, mc_version: &str) ->
         }
     }
 
+    let meta_file = instance_dir.join("fabric_launch_meta.json");
+    let mut resolved_mc = mc_version.trim().to_string();
+    if meta_file.exists() && (resolved_mc == "latest" || resolved_mc.is_empty()) {
+        if let Ok(content) = fs::read_to_string(&meta_file) {
+            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(mc) = meta["mc_version"].as_str() {
+                    resolved_mc = mc.trim().to_string();
+                }
+            }
+        }
+    }
+
     // 2. Base version from Minecraft version string
-    let trimmed_mc = mc_version.trim();
+    let trimmed_mc = resolved_mc.trim();
     if trimmed_mc.starts_with("26.") || trimmed_mc.starts_with("27.") {
         required = required.max(25);
     } else if trimmed_mc.starts_with("1.21") || trimmed_mc.starts_with("1.20.5") || trimmed_mc.starts_with("1.20.6") {
@@ -132,6 +144,8 @@ pub fn determine_required_java_version(instance_dir: &Path, mc_version: &str) ->
         required = required.max(17);
     } else if !trimmed_mc.is_empty() && (trimmed_mc.starts_with("1.16") || trimmed_mc.starts_with("1.12") || trimmed_mc.starts_with("1.7")) {
         required = 8;
+    } else if trimmed_mc == "latest" || trimmed_mc.is_empty() {
+        required = required.max(21);
     }
 
     // 3. Scan mods directory for higher Java requirements (e.g. Fabric API 26.3 requiring Java >= 25)
@@ -165,6 +179,14 @@ fn inspect_jar_for_java_requirement(jar_path: &Path) -> Option<u32> {
                     if let Some(v) = parse_java_version_spec(dep_java) {
                         return Some(v);
                     }
+                } else if let Some(arr) = val["depends"]["java"].as_array() {
+                    for item in arr {
+                        if let Some(s) = item.as_str() {
+                            if let Some(v) = parse_java_version_spec(s) {
+                                return Some(v);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -186,23 +208,25 @@ fn inspect_jar_for_java_requirement(jar_path: &Path) -> Option<u32> {
 }
 
 fn parse_java_version_spec(spec: &str) -> Option<u32> {
-    let digits: String = spec.chars().filter(|c| c.is_ascii_digit()).collect();
-    if let Ok(num) = digits.parse::<u32>() {
-        if num >= 8 && num <= 35 {
-            return Some(num);
-        }
-    }
-    None
+    spec.split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u32>().ok())
+        .find(|&num| (8..=35).contains(&num))
 }
 
 fn parse_forge_mods_toml_java(content: &str) -> Option<u32> {
+    let mut in_java_block = false;
     for line in content.lines() {
-        if line.contains("java") && line.contains("versionRange") {
-            let digits: String = line.chars().filter(|c| c.is_ascii_digit()).collect();
-            if let Ok(num) = digits.parse::<u32>() {
-                if num >= 8 && num <= 35 {
-                    return Some(num);
-                }
+        let trimmed = line.trim();
+        if trimmed.starts_with("[[dependencies") {
+            in_java_block = false;
+        }
+        if trimmed.contains("modId") && (trimmed.contains("\"java\"") || trimmed.contains("'java'")) {
+            in_java_block = true;
+        }
+        if in_java_block && trimmed.contains("versionRange") {
+            if let Some(v) = parse_java_version_spec(trimmed) {
+                return Some(v);
             }
         }
     }

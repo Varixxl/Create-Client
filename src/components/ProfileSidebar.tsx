@@ -167,6 +167,11 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
                           {p.ram_gb}GB
                         </span>
                       )}
+                      {p.java_version && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                          Java {p.java_version}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

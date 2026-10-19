@@ -75,6 +75,11 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded bg-[#12c3ca]/10 border border-[#12c3ca]/40 text-[#5ce1e6]">
               {loaderLabel}
             </span>
+            {activeModpack?.java_version && (
+              <span className="text-[10px] font-bold tracking-wider uppercase px-2 py-0.5 rounded bg-blue-500/15 border border-blue-500/40 text-blue-300 font-mono">
+                Java {activeModpack.java_version}
+              </span>
+            )}
           </div>
           <p className="text-[11px] text-[#8fa0bc] tracking-tight">
             Multi-Instance Modpack & Server Launcher
