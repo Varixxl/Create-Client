@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle, Monitor, Sparkles, Key, ExternalLink } from "lucide-react";
+import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle, Monitor, Sparkles, Key, ExternalLink, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { AppConfig, GraphicsInfo } from "../types";
 
@@ -12,6 +12,8 @@ interface SettingsModalProps {
   onForceRepair: () => void;
   onDeleteAllFiles: () => Promise<void>;
   onResetDefaults: () => Promise<void>;
+  onRefreshAuth?: () => void;
+  isRefreshingAuth?: boolean;
 }
 
 const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch";
@@ -25,6 +27,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
   onForceRepair,
   onDeleteAllFiles,
   onResetDefaults,
+  onRefreshAuth,
+  isRefreshingAuth,
 }) => {
   const [ram, setRam] = useState(config.ram_gb);
   const [jvmFlags, setJvmFlags] = useState(config.jvm_flags);
@@ -344,6 +348,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
                 <RotateCcw className={`w-3.5 h-3.5 text-[#12c3ca] ${isResettingDefaults ? "animate-spin" : ""}`} />
                 <span>{resetSuccess ? "Settings Restored to Defaults!" : isResettingDefaults ? "Restoring..." : "Reset to Modpack Defaults"}</span>
               </button>
+              {onRefreshAuth && (
+                <button
+                  type="button"
+                  onClick={onRefreshAuth}
+                  disabled={isRefreshingAuth}
+                  className="px-3.5 py-2 bg-[#182232] hover:bg-[#242e3e] text-[#12c3ca] border border-[#12c3ca]/40 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-[#12c3ca] ${isRefreshingAuth ? "animate-spin" : ""}`} />
+                  <span>{isRefreshingAuth ? "Refreshing Session..." : "Refresh Authorization"}</span>
+                </button>
+              )}
             </div>
           </div>
 

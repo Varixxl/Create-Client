@@ -279,6 +279,23 @@ pub async fn ensure_valid_profile(force_refresh: bool) -> Result<Option<Minecraf
     Ok(Some(profile))
 }
 
+pub async fn force_refresh_profile() -> Result<MinecraftProfile, String> {
+    let profile = load_saved_profile()
+        .ok_or_else(|| "No saved Minecraft profile found. Please sign in first.".to_string())?;
+
+    if profile.refresh_token.trim().is_empty() {
+        return Err("No refresh token available. Please sign in with Microsoft again.".to_string());
+    }
+
+    let cfg = crate::config::load_config();
+    let refreshed = refresh_saved_session(&cfg.azure_client_id, &profile.refresh_token)
+        .await
+        .map_err(|e| format!("Failed to refresh authorization: {}", e))?;
+
+    save_profile(&refreshed)?;
+    Ok(refreshed)
+}
+
 // ---------------- Xbox Live, XSTS & Minecraft Services ----------------
 
 #[derive(Deserialize)]

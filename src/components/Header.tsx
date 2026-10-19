@@ -28,6 +28,8 @@ interface HeaderProps {
   onLogin: () => void;
   onLogout: () => void;
   isLoggingIn: boolean;
+  onRefreshAuth: () => void;
+  isRefreshingAuth: boolean;
   clientUpdate: ClientUpdateInfo | null;
   onCheckUpdates: () => void;
   isCheckingUpdates: boolean;
@@ -45,6 +47,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogin,
   onLogout,
   isLoggingIn,
+  onRefreshAuth,
+  isRefreshingAuth,
   clientUpdate,
   onCheckUpdates,
   isCheckingUpdates,
@@ -158,16 +162,30 @@ export const Header: React.FC<HeaderProps> = ({
                 {profile.username}
               </span>
               <span className="text-[10px] text-[#12c3ca] font-medium leading-tight">
-                Ready to Play
+                {isRefreshingAuth ? "Refreshing..." : "Ready to Play"}
               </span>
             </div>
-            <button
-              onClick={onLogout}
-              title="Sign Out"
-              className="ml-1.5 text-[#8fa0bc] hover:text-red-400 transition-colors p-1 rounded hover:bg-white/5 cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-[#243144]">
+              <button
+                onClick={onRefreshAuth}
+                disabled={isRefreshingAuth}
+                title="Refresh Authorization (Renew Microsoft & Minecraft Session)"
+                className="text-[#8fa0bc] hover:text-[#12c3ca] transition-colors p-1 rounded hover:bg-white/5 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${
+                    isRefreshingAuth ? "animate-spin text-[#12c3ca]" : ""
+                  }`}
+                />
+              </button>
+              <button
+                onClick={onLogout}
+                title="Sign Out"
+                className="text-[#8fa0bc] hover:text-red-400 transition-colors p-1 rounded hover:bg-white/5 cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         ) : (
           <button

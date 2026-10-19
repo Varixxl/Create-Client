@@ -8,7 +8,7 @@ if not TOKEN:
         pass
 
 REPO = 'Varixxl/Create-Client'
-TAG = 'v1.2.4'
+TAG = 'v1.2.5'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -20,15 +20,14 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - UI Performance Overhaul & Input Latency Fix',
-    'body': """## What's Changed in Create Client v1.2.4
+    'name': f'Create Client {TAG} - One-Click Authorization Refresh & In-Game Auth Support',
+    'body': """## What's Changed in Create Client v1.2.5
 
-### ⚡ UI Performance Overhaul & Instant Input Responsiveness
-- **Eliminated Text Field & Modal Lag:** Resolved severe input lag when typing into profile names, descriptions, and search fields by eliminating expensive software backdrop-filter blurs and full-tree re-renders.
-- **Intelligent Background Animation Control:** The continuous 165 FPS background panorama animation now automatically pauses whenever any modal, drawer, or dialog is active, or when the launcher window loses focus—dropping idle CPU/GPU usage to near-zero.
-- **Removed Heavy CSS Filters:** Eliminated all `backdrop-blur-*` and large 64px Gaussian `blur-3xl` layers, replacing them with high-performance solid obsidian panels (`#0a0d13` / `#0e121a`), crisp 1px borders, and drop shadows.
-- **React Component & List Memoization:** Wrapped `CustomDropdown`, `ProfileModal`, `ModsPanel`, `SettingsModal`, and `CreateServerModal` in `React.memo` and memoized version mapping arrays (`useMemo`), preventing unneeded DOM reconciliation on every keystroke.
-- **Linux NVIDIA Wayland Driver Guard:** Automatically sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` in Rust `main.rs` on Linux, resolving known NVIDIA proprietary driver frame pacing stutters and input latency under Wayland/Hyprland.""",
+### 🔄 One-Click Microsoft & Minecraft Session Refresh
+- **Header Profile Refresh Button:** Added a dedicated refresh button (`RefreshCw`) beside the user profile avatar in the launcher header to immediately re-authenticate with Microsoft, Xbox Live, and Minecraft Services without having to sign out or reopen browser login flows.
+- **Settings Troubleshooting Action:** Integrated a manual 'Refresh Authorization' troubleshooting button inside Global Settings -> Troubleshooting & Integrity to verify and renew active sessions.
+- **Real-Time Visual Feedback:** Status badge displays 'Refreshing...' and spins during renewal, showing immediate toast feedback ('Authorization refreshed successfully! Ready to play') or actionable error reporting if Microsoft credentials have expired.
+- **Backend Token Renewal Engine:** Added the `refresh_auth` Tauri command and `force_refresh_profile` Rust service, refreshing Microsoft OAuth tokens, renewing XSTS claims, and saving the updated session.""",
     'draft': False,
     'prerelease': False
 }
@@ -47,9 +46,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.2.4-windows-x64.zip', 'Create-Client-1.2.4-windows-x64.zip', 'application/zip'),
+    ('Create-Client-1.2.5-windows-x64.zip', 'Create-Client-1.2.5-windows-x64.zip', 'application/zip'),
     ('create-client', 'create-client', 'application/octet-stream'),
-    ('create-client-1.2.4-linux-x86_64.tar.gz', 'create-client-1.2.4-linux-x86_64.tar.gz', 'application/gzip')
+    ('create-client-1.2.5-linux-x86_64.tar.gz', 'create-client-1.2.5-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:

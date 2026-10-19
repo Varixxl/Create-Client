@@ -56,6 +56,7 @@ export const App: React.FC = () => {
   const [progress, setProgress] = useState<ProgressPayload | null>(null);
 
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isRefreshingAuth, setIsRefreshingAuth] = useState(false);
   const [deviceInfo, setDeviceInfo] = useState<DeviceCodeInfo | null>(null);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const pollingRef = useRef<number | null>(null);
@@ -350,6 +351,23 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleRefreshAuth = async () => {
+    if (isRefreshingAuth) return;
+    setIsRefreshingAuth(true);
+    setErrorMsg(null);
+    try {
+      const refreshedProfile = await invoke<MinecraftProfile>("refresh_auth");
+      setProfile(refreshedProfile);
+      showToast("Authorization refreshed successfully! Ready to play.");
+    } catch (err: any) {
+      const msg = typeof err === "string" ? err : JSON.stringify(err);
+      setErrorMsg(`Authorization refresh failed: ${msg}`);
+      showToast("Failed to refresh authorization. Check network or sign in again.");
+    } finally {
+      setIsRefreshingAuth(false);
+    }
+  };
+
   const handleSaveConfig = async (updated: AppConfig) => {
     try {
       await invoke("save_config", { config: updated });
@@ -592,6 +610,8 @@ export const App: React.FC = () => {
         onLogin={handleLogin}
         onLogout={handleLogout}
         isLoggingIn={isLoggingIn}
+        onRefreshAuth={handleRefreshAuth}
+        isRefreshingAuth={isRefreshingAuth}
         clientUpdate={clientUpdate}
         onCheckUpdates={() => handleCheckAllUpdates(true)}
         isCheckingUpdates={isCheckingUpdates}
@@ -1074,6 +1094,8 @@ export const App: React.FC = () => {
           onForceRepair={handleForceRepair}
           onDeleteAllFiles={handleDeleteAllFiles}
           onResetDefaults={handleResetDefaults}
+          onRefreshAuth={handleRefreshAuth}
+          isRefreshingAuth={isRefreshingAuth}
         />
       )}
 

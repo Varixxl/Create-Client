@@ -337,6 +337,12 @@ async fn get_auth_status() -> AuthStatus {
 }
 
 #[tauri::command]
+async fn refresh_auth() -> Result<auth::MinecraftProfile, String> {
+    let profile = auth::force_refresh_profile().await?;
+    Ok(profile.redacted_for_frontend())
+}
+
+#[tauri::command]
 async fn start_device_login() -> Result<auth::DeviceCodeInfo, String> {
     auth::start_device_flow().await
 }
@@ -587,6 +593,7 @@ pub fn run() {
             clear_instance_logs,
             diagnose_profile,
             get_auth_status,
+            refresh_auth,
             start_device_login,
             poll_device_login,
             logout,

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 
-pub const CURRENT_VERSION: &str = "1.2.4";
+pub const CURRENT_VERSION: &str = "1.2.5";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientUpdateInfo {
