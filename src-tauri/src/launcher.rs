@@ -186,8 +186,50 @@ pub fn maven_to_path(name: &str) -> Option<String> {
     ))
 }
 
+pub fn detect_java_major_version(java_bin: &Path) -> u32 {
+    let path_str = java_bin.to_string_lossy();
+    if path_str.contains("java25") {
+        return 25;
+    } else if path_str.contains("java21") {
+        return 21;
+    } else if path_str.contains("java17") {
+        return 17;
+    } else if path_str.contains("java8") {
+        return 8;
+    }
+
+    if let Ok(output) = Command::new(java_bin).arg("-version").output() {
+        let err_text = String::from_utf8_lossy(&output.stderr);
+        let out_text = String::from_utf8_lossy(&output.stdout);
+        let text = format!("{}\n{}", err_text, out_text);
+        for line in text.lines() {
+            if line.contains("version") {
+                if let Some(start) = line.find('"') {
+                    if let Some(end) = line[start + 1..].find('"') {
+                        let ver_str = &line[start + 1..start + 1 + end];
+                        let parts: Vec<&str> = ver_str.split('.').collect();
+                        if let Some(first) = parts.first() {
+                            if *first == "1" {
+                                if let Some(second) = parts.get(1) {
+                                    if let Ok(v) = second.parse::<u32>() {
+                                        return v;
+                                    }
+                                }
+                            } else if let Ok(v) = first.parse::<u32>() {
+                                return v;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    21
+}
+
 pub fn launch_minecraft(
     app: &AppHandle,
+    profile_id: &str,
     java_bin: &Path,
     game_dir: &Path,
     profile: &MinecraftProfile,
@@ -326,14 +368,23 @@ pub fn launch_minecraft(
         }
     }
 
+    let java_major = detect_java_major_version(java_bin);
     let has_gc_flag = final_jvm_flags
         .iter()
         .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
 
     if !has_gc_flag {
-        for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
-            if !final_jvm_flags.iter().any(|f| f == fallback) {
-                final_jvm_flags.push(fallback.to_string());
+        if java_major < 21 {
+            for fallback in ["-XX:+UseG1GC", "-XX:+AlwaysPreTouch"] {
+                if !final_jvm_flags.iter().any(|f| f == fallback) {
+                    final_jvm_flags.push(fallback.to_string());
+                }
+            }
+        } else {
+            for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
+                if !final_jvm_flags.iter().any(|f| f == fallback) {
+                    final_jvm_flags.push(fallback.to_string());
+                }
             }
         }
     }
@@ -450,6 +501,7 @@ pub fn launch_minecraft(
     let app_handle = app.clone();
     let game_dir_buf = game_dir.to_path_buf();
 
+    let profile_id_str = profile_id.to_string();
     std::thread::spawn(move || {
         let _ = app_handle.emit("game-status", true);
         let wait_res = child.wait();
@@ -461,12 +513,20 @@ pub fn launch_minecraft(
         if !was_forced {
             if let Ok(exit_status) = wait_res {
                 if !exit_status.success() {
-                    let log_file = game_dir_buf.join("launcher_log.txt");
-                    if let Ok(log_content) = fs::read_to_string(&log_file) {
-                        let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
-                        let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
-                        let _ = app_handle.emit("game-error", err_summary);
-                    }
+                    let diagnosis = crate::diagnostics::diagnose_instance_crash(
+                        &profile_id_str,
+                        &game_dir_buf,
+                        exit_status.code(),
+                    );
+                    let err_summary = format!(
+                        "[{}] {}\n\nRoot Cause:\n{}\n\nSuggested Fix:\n{}",
+                        diagnosis.issue_category,
+                        diagnosis.summary,
+                        diagnosis.root_cause,
+                        diagnosis.suggested_fix
+                    );
+                    let _ = app_handle.emit("game-error", err_summary);
+                    let _ = app_handle.emit("game-crash-diagnosis", diagnosis);
                 }
             }
         }
@@ -477,6 +537,7 @@ pub fn launch_minecraft(
 
 pub fn launch_fabric_or_vanilla(
     app: &AppHandle,
+    profile_id: &str,
     java_bin: &Path,
     instance_dir: &Path,
     profile: &MinecraftProfile,
@@ -527,14 +588,23 @@ pub fn launch_fabric_or_vanilla(
         }
     }
 
+    let java_major = detect_java_major_version(java_bin);
     let has_gc_flag = final_jvm_flags
         .iter()
         .any(|f| f.starts_with("-XX:+Use") && f.ends_with("GC"));
 
     if !has_gc_flag {
-        for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
-            if !final_jvm_flags.iter().any(|f| f == fallback) {
-                final_jvm_flags.push(fallback.to_string());
+        if java_major < 21 {
+            for fallback in ["-XX:+UseG1GC", "-XX:+AlwaysPreTouch"] {
+                if !final_jvm_flags.iter().any(|f| f == fallback) {
+                    final_jvm_flags.push(fallback.to_string());
+                }
+            }
+        } else {
+            for fallback in ["-XX:+UseZGC", "-XX:+ZGenerational", "-XX:+AlwaysPreTouch"] {
+                if !final_jvm_flags.iter().any(|f| f == fallback) {
+                    final_jvm_flags.push(fallback.to_string());
+                }
             }
         }
     }
@@ -633,6 +703,7 @@ pub fn launch_fabric_or_vanilla(
     let app_handle = app.clone();
     let instance_dir_buf = instance_dir.to_path_buf();
 
+    let profile_id_str = profile_id.to_string();
     std::thread::spawn(move || {
         let _ = app_handle.emit("game-status", true);
         let wait_res = child.wait();
@@ -644,12 +715,20 @@ pub fn launch_fabric_or_vanilla(
         if !was_forced {
             if let Ok(exit_status) = wait_res {
                 if !exit_status.success() {
-                    let log_file = instance_dir_buf.join("launcher_log.txt");
-                    if let Ok(log_content) = fs::read_to_string(&log_file) {
-                        let last_lines: Vec<&str> = log_content.lines().rev().take(15).collect();
-                        let err_summary = last_lines.into_iter().rev().collect::<Vec<_>>().join("\n");
-                        let _ = app_handle.emit("game-error", err_summary);
-                    }
+                    let diagnosis = crate::diagnostics::diagnose_instance_crash(
+                        &profile_id_str,
+                        &instance_dir_buf,
+                        exit_status.code(),
+                    );
+                    let err_summary = format!(
+                        "[{}] {}\n\nRoot Cause:\n{}\n\nSuggested Fix:\n{}",
+                        diagnosis.issue_category,
+                        diagnosis.summary,
+                        diagnosis.root_cause,
+                        diagnosis.suggested_fix
+                    );
+                    let _ = app_handle.emit("game-error", err_summary);
+                    let _ = app_handle.emit("game-crash-diagnosis", diagnosis);
                 }
             }
         }

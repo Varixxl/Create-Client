@@ -71,41 +71,174 @@ pub fn get_runtime_dir() -> PathBuf {
 }
 
 pub fn get_java_executable(runtime_dir: &Path) -> PathBuf {
+    get_java_executable_for_version(runtime_dir, 21)
+}
+
+pub fn get_java_executable_for_version(runtime_dir: &Path, major: u32) -> PathBuf {
+    let folder_name = format!("java{}", major);
     #[cfg(target_os = "windows")]
     {
-        let javaw = runtime_dir.join("java21").join("bin").join("javaw.exe");
+        let javaw = runtime_dir.join(&folder_name).join("bin").join("javaw.exe");
         if javaw.exists() {
             javaw
         } else {
-            runtime_dir.join("java21").join("bin").join("java.exe")
+            runtime_dir.join(&folder_name).join("bin").join("java.exe")
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        runtime_dir.join("java21").join("bin").join("java")
+        runtime_dir.join(&folder_name).join("bin").join("java")
     }
 }
 
 pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf, String> {
-    let java_bin = get_java_executable(runtime_dir);
+    ensure_java_version(app, runtime_dir, 21).await
+}
+
+pub async fn ensure_java_for_instance(
+    app: &AppHandle,
+    instance_dir: &Path,
+    mc_version: &str,
+) -> Result<PathBuf, String> {
+    let required_version = determine_required_java_version(instance_dir, mc_version);
+    let runtime_dir = get_runtime_dir();
+    ensure_java_version(app, &runtime_dir, required_version).await
+}
+
+pub fn determine_required_java_version(instance_dir: &Path, mc_version: &str) -> u32 {
+    let mut required = 17;
+
+    // 1. Inspect version.json in instance_dir (e.g. Forge 1.20.1 specifies majorVersion 17)
+    let version_file = instance_dir.join("version.json");
+    if version_file.exists() {
+        if let Ok(content) = fs::read_to_string(&version_file) {
+            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(major) = meta["javaVersion"]["majorVersion"].as_u64() {
+                    required = required.max(major as u32);
+                }
+            }
+        }
+    }
+
+    // 2. Base version from Minecraft version string
+    let trimmed_mc = mc_version.trim();
+    if trimmed_mc.starts_with("26.") || trimmed_mc.starts_with("27.") {
+        required = required.max(25);
+    } else if trimmed_mc.starts_with("1.21") || trimmed_mc.starts_with("1.20.5") || trimmed_mc.starts_with("1.20.6") {
+        required = required.max(21);
+    } else if trimmed_mc.starts_with("1.18") || trimmed_mc.starts_with("1.19") || trimmed_mc.starts_with("1.20") {
+        required = required.max(17);
+    } else if trimmed_mc.starts_with("1.17") {
+        required = required.max(17);
+    } else if !trimmed_mc.is_empty() && (trimmed_mc.starts_with("1.16") || trimmed_mc.starts_with("1.12") || trimmed_mc.starts_with("1.7")) {
+        required = 8;
+    }
+
+    // 3. Scan mods directory for higher Java requirements (e.g. Fabric API 26.3 requiring Java >= 25)
+    let mods_dir = instance_dir.join("mods");
+    if mods_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&mods_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("jar") {
+                    if let Some(mod_java) = inspect_jar_for_java_requirement(&p) {
+                        required = required.max(mod_java);
+                    }
+                }
+            }
+        }
+    }
+
+    required
+}
+
+fn inspect_jar_for_java_requirement(jar_path: &Path) -> Option<u32> {
+    let file = fs::File::open(jar_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    // Check fabric.mod.json
+    if let Ok(mut mod_json_file) = archive.by_name("fabric.mod.json") {
+        let mut content = String::new();
+        if std::io::Read::read_to_string(&mut mod_json_file, &mut content).is_ok() {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(dep_java) = val["depends"]["java"].as_str() {
+                    if let Some(v) = parse_java_version_spec(dep_java) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+    }
+
+    // Check META-INF/mods.toml or neoforge.mods.toml
+    for toml_path in ["META-INF/mods.toml", "META-INF/neoforge.mods.toml"] {
+        if let Ok(mut toml_file) = archive.by_name(toml_path) {
+            let mut content = String::new();
+            if std::io::Read::read_to_string(&mut toml_file, &mut content).is_ok() {
+                if let Some(v) = parse_forge_mods_toml_java(&content) {
+                    return Some(v);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_java_version_spec(spec: &str) -> Option<u32> {
+    let digits: String = spec.chars().filter(|c| c.is_ascii_digit()).collect();
+    if let Ok(num) = digits.parse::<u32>() {
+        if num >= 8 && num <= 35 {
+            return Some(num);
+        }
+    }
+    None
+}
+
+fn parse_forge_mods_toml_java(content: &str) -> Option<u32> {
+    for line in content.lines() {
+        if line.contains("java") && line.contains("versionRange") {
+            let digits: String = line.chars().filter(|c| c.is_ascii_digit()).collect();
+            if let Ok(num) = digits.parse::<u32>() {
+                if num >= 8 && num <= 35 {
+                    return Some(num);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub async fn ensure_java_version(
+    app: &AppHandle,
+    runtime_dir: &Path,
+    major: u32,
+) -> Result<PathBuf, String> {
+    let java_bin = get_java_executable_for_version(runtime_dir, major);
     if java_bin.exists() {
         return Ok(java_bin);
     }
 
     fs::create_dir_all(runtime_dir).map_err(|e| format!("Failed to create runtime directory: {}", e))?;
 
-    let download_url = if cfg!(target_os = "windows") {
-        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-win_x64.zip"
+    let os_str = if cfg!(target_os = "windows") {
+        "windows"
     } else if cfg!(target_os = "macos") {
-        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-macosx_x64.tar.gz"
+        "mac"
     } else {
-        "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-linux_x64.tar.gz"
+        "linux"
+    };
+
+    let arch_str = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x64"
     };
 
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Resolving Azul Zulu 21 Runtime...".to_string(),
+            task: format!("Resolving OpenJDK {} Runtime...", major),
             current_bytes: 0,
             total_bytes: 100,
             percentage: 0.0,
@@ -113,16 +246,82 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         },
     );
 
-    let is_zip = download_url.ends_with(".zip");
-    let archive_ext = if is_zip { "zip" } else { "tar.gz" };
-    let temp_archive = runtime_dir.join(format!("java21_download.{}", archive_ext));
+    // Try resolving download link via Adoptium API first
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
 
-    download_file_with_progress(app, download_url, &temp_archive, "Downloading Azul Zulu 21 JRE").await?;
+    let adoptium_url = format!(
+        "https://api.adoptium.net/v3/assets/latest/{}/hotspot?image_type=jre&os={}&architecture={}",
+        major, os_str, arch_str
+    );
+
+    let mut download_url = None;
+    if let Ok(resp) = client.get(&adoptium_url).header("User-Agent", "Create-Client").send().await {
+        if let Ok(data) = resp.json::<serde_json::Value>().await {
+            if let Some(arr) = data.as_array() {
+                if let Some(first) = arr.first() {
+                    if let Some(link) = first["binary"]["package"]["link"].as_str() {
+                        download_url = Some(link.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // High-availability fallback URLs
+    let final_url = download_url.unwrap_or_else(|| {
+        match major {
+            25 => {
+                if cfg!(target_os = "windows") {
+                    "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jre_x64_windows_hotspot_25.0.4.1_1.zip".to_string()
+                } else if cfg!(target_os = "macos") {
+                    "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jre_x64_mac_hotspot_25.0.4.1_1.tar.gz".to_string()
+                } else {
+                    "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.4.1%2B1/OpenJDK25U-jre_x64_linux_hotspot_25.0.4.1_1.tar.gz".to_string()
+                }
+            }
+            17 => {
+                if cfg!(target_os = "windows") {
+                    "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jre_x64_windows_hotspot_17.0.20.1_1.zip".to_string()
+                } else if cfg!(target_os = "macos") {
+                    "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jre_x64_mac_hotspot_17.0.20.1_1.tar.gz".to_string()
+                } else {
+                    "https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.20.1%2B1/OpenJDK17U-jre_x64_linux_hotspot_17.0.20.1_1.tar.gz".to_string()
+                }
+            }
+            8 => {
+                if cfg!(target_os = "windows") {
+                    "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u504-b01/OpenJDK8U-jre_x64_windows_hotspot_8u504b01.zip".to_string()
+                } else {
+                    "https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u504-b01/OpenJDK8U-jre_x64_linux_hotspot_8u504b01.tar.gz".to_string()
+                }
+            }
+            _ => {
+                // Default Java 21 Azul Zulu fallback
+                if cfg!(target_os = "windows") {
+                    "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-win_x64.zip".to_string()
+                } else if cfg!(target_os = "macos") {
+                    "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-macosx_x64.tar.gz".to_string()
+                } else {
+                    "https://cdn.azul.com/zulu/bin/zulu21.52.203-ca-jre21.0.12.1-linux_x64.tar.gz".to_string()
+                }
+            }
+        }
+    });
+
+    let is_zip = final_url.ends_with(".zip");
+    let archive_ext = if is_zip { "zip" } else { "tar.gz" };
+    let temp_archive = runtime_dir.join(format!("java{}_download.{}", major, archive_ext));
+
+    let download_label = format!("Downloading OpenJDK {} JRE", major);
+    download_file_with_progress(app, &final_url, &temp_archive, &download_label).await?;
 
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Extracting Azul Zulu 21 JRE...".to_string(),
+            task: format!("Extracting OpenJDK {} JRE...", major),
             current_bytes: 100,
             total_bytes: 100,
             percentage: 99.0,
@@ -130,7 +329,7 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         },
     );
 
-    let temp_extract_dir = runtime_dir.join("java21_extract_temp");
+    let temp_extract_dir = runtime_dir.join(format!("java{}_extract_temp", major));
     let _ = fs::remove_dir_all(&temp_extract_dir);
     fs::create_dir_all(&temp_extract_dir).map_err(|e| e.to_string())?;
 
@@ -142,7 +341,6 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
 
     let _ = fs::remove_file(&temp_archive);
 
-    // Find the inner directory Azul created (e.g. `zulu21.52.203-ca-jre21.0.12.1-...`)
     let mut inner_dir = None;
     for entry in fs::read_dir(&temp_extract_dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
@@ -152,26 +350,26 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
         }
     }
 
-    let target_java21 = runtime_dir.join("java21");
-    let _ = fs::remove_dir_all(&target_java21);
+    let target_dir = runtime_dir.join(format!("java{}", major));
+    let _ = fs::remove_dir_all(&target_dir);
 
     if let Some(src) = inner_dir {
-        fs::rename(src, &target_java21).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
+        fs::rename(src, &target_dir).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
     } else {
-        fs::rename(&temp_extract_dir, &target_java21).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
+        fs::rename(&temp_extract_dir, &target_dir).map_err(|e| format!("Failed to move extracted JRE: {}", e))?;
     }
     let _ = fs::remove_dir_all(&temp_extract_dir);
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let bin_path = get_java_executable(runtime_dir);
+        let bin_path = get_java_executable_for_version(runtime_dir, major);
         if bin_path.exists() {
             let _ = fs::set_permissions(&bin_path, fs::Permissions::from_mode(0o755));
         }
     }
 
-    let final_bin = get_java_executable(runtime_dir);
+    let final_bin = get_java_executable_for_version(runtime_dir, major);
     if !final_bin.exists() {
         return Err(format!("Java binary was not found at expected path: {:?}", final_bin));
     }
@@ -179,7 +377,7 @@ pub async fn ensure_java(app: &AppHandle, runtime_dir: &Path) -> Result<PathBuf,
     let _ = app.emit(
         "download-progress",
         ProgressPayload {
-            task: "Azul Zulu 21 Ready".to_string(),
+            task: format!("OpenJDK {} Ready", major),
             current_bytes: 100,
             total_bytes: 100,
             percentage: 100.0,

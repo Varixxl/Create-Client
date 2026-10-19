@@ -1358,6 +1358,11 @@ pub async fn sync_profile_instance(
         .await?;
     }
 
+    // Ensure the exact Java runtime version required by Minecraft and all installed mods
+    let req_java = crate::downloader::determine_required_java_version(&instance_dir, &target_mc);
+    let runtime_dir = crate::downloader::get_runtime_dir();
+    let _ = crate::downloader::ensure_java_version(app, &runtime_dir, req_java).await?;
+
     // 9. Update profile metadata in profiles.json
     state.profiles[profile_idx].resolved_mc_version = Some(target_mc.clone());
     if profile.loader == "fabric" {

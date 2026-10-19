@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod config;
+pub mod diagnostics;
 pub mod downloader;
 pub mod launcher;
 pub mod pinger;
@@ -130,13 +131,13 @@ async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, Strin
             })?
             .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-        let runtime_dir = downloader::get_runtime_dir();
-        let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+        let java_bin = downloader::ensure_java_for_instance(&app, &game_dir, "1.20.1").await?;
         downloader::ensure_libraries(&app, &game_dir).await?;
         downloader::ensure_assets(&app, &game_dir).await?;
 
         return launcher::launch_minecraft(
             &app,
+            &target_profile.id,
             &java_bin,
             &game_dir,
             &auth_prof,
@@ -162,11 +163,15 @@ async fn launch_profile(app: AppHandle, profile_id: String) -> Result<u32, Strin
         })?
         .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-    let runtime_dir = downloader::get_runtime_dir();
-    let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+    let mc_ver = target_profile
+        .resolved_mc_version
+        .as_deref()
+        .unwrap_or(&target_profile.mc_version);
+    let java_bin = downloader::ensure_java_for_instance(&app, &instance_dir, mc_ver).await?;
 
     launcher::launch_fabric_or_vanilla(
         &app,
+        &target_profile.id,
         &java_bin,
         &instance_dir,
         &auth_prof,
@@ -380,16 +385,15 @@ async fn launch_game(app: AppHandle) -> Result<u32, String> {
         .map_err(|e| format!("Session expired and automatic refresh failed ({}). Please sign in again.", e))?
         .ok_or_else(|| "Not signed in. Please sign in to launch.".to_string())?;
 
-    // Ensure Java 21
-    let runtime_dir = downloader::get_runtime_dir();
-    let java_bin = downloader::ensure_java(&app, &runtime_dir).await?;
+    // Ensure correct Java version for instance
+    let java_bin = downloader::ensure_java_for_instance(&app, &game_dir, "1.20.1").await?;
 
     // Ensure all platform-specific libraries, natives, and vanilla assets are present before launching
     downloader::ensure_libraries(&app, &game_dir).await?;
     downloader::ensure_assets(&app, &game_dir).await?;
 
     // Launch Forge process
-    launcher::launch_minecraft(&app, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect, &cfg.graphics_preset)
+    launcher::launch_minecraft(&app, CREATE_SERVER_PROFILE_ID, &java_bin, &game_dir, &profile, cfg.ram_gb, &cfg.jvm_flags, cfg.auto_connect, &cfg.graphics_preset)
 }
 
 #[derive(serde::Serialize)]
@@ -524,6 +528,18 @@ fn force_close_game(app: AppHandle) -> Result<(), String> {
     launcher::kill_minecraft(&app)
 }
 
+#[tauri::command]
+fn diagnose_profile(profile_id: String) -> Result<diagnostics::CrashDiagnosis, String> {
+    let state = profiles::load_profiles_state();
+    let profile = state
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
+    let dir = PathBuf::from(&profile.instance_dir);
+    Ok(diagnostics::diagnose_instance_crash(&profile_id, &dir, None))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -560,6 +576,7 @@ pub fn run() {
             ping_server_instance,
             get_instance_logs,
             clear_instance_logs,
+            diagnose_profile,
             get_auth_status,
             start_device_login,
             poll_device_login,
