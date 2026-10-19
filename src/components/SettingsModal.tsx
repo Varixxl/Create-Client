@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle, Monitor, Sparkles } from "lucide-react";
+import { X, FolderOpen, Wrench, Check, RotateCcw, Trash2, AlertTriangle, Monitor, Sparkles, Key, ExternalLink } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { AppConfig, GraphicsInfo } from "../types";
 
@@ -30,6 +30,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [jvmFlags, setJvmFlags] = useState(config.jvm_flags);
   const [gameDir, setGameDir] = useState(config.game_dir);
   const [graphicsPreset, setGraphicsPreset] = useState(config.graphics_preset || "auto");
+  const [curseforgeApiKey, setCurseforgeApiKey] = useState(config.curseforge_api_key || "");
   const [graphicsInfo, setGraphicsInfo] = useState<GraphicsInfo | null>(null);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
@@ -44,6 +45,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setJvmFlags(config.jvm_flags);
       setGameDir(config.game_dir);
       setGraphicsPreset(config.graphics_preset || "auto");
+      setCurseforgeApiKey(config.curseforge_api_key || "");
       setIsConfirmingDelete(false);
 
       invoke<GraphicsInfo>("get_graphics_info")
@@ -61,6 +63,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       jvm_flags: jvmFlags,
       game_dir: gameDir,
       graphics_preset: graphicsPreset,
+      curseforge_api_key: curseforgeApiKey,
     };
     await onSaveConfig(updated);
     setSavedSuccess(true);
@@ -284,6 +287,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Browse
               </button>
             </div>
+          </div>
+
+          {/* CurseForge API Key */}
+          <div className="space-y-2.5 p-3.5 bg-[#141b26] border border-[#263042] rounded-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-amber-400" />
+                <label className="font-bold text-[#e4e8ee] uppercase tracking-wider text-[11px]">
+                  CurseForge API Key (User Provided)
+                </label>
+              </div>
+              <a
+                href="https://console.curseforge.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-[#12c3ca] hover:text-[#5ce1e6] flex items-center gap-1 font-mono transition-colors"
+              >
+                <span>Get API Key</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            <p className="text-[11px] text-[#8fa0bc] leading-relaxed">
+              CurseForge requires a personal API key to search and install content from their platform. Get your free key at the CurseForge Console and paste it here to enable CurseForge search.
+            </p>
+            <input
+              type="password"
+              value={curseforgeApiKey}
+              onChange={(e) => setCurseforgeApiKey(e.target.value)}
+              placeholder="$2a$10$..."
+              className="w-full bg-[#1c2432] border border-[#263042] focus:border-[#12c3ca] rounded-lg px-3 py-2 text-xs font-mono text-[#e4e8ee] focus:outline-none"
+            />
           </div>
 
           {/* Troubleshooting & Integrity */}

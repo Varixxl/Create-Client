@@ -9,6 +9,7 @@ import {
   Play,
   Package,
   Terminal,
+  Server,
 } from "lucide-react";
 import {
   MinecraftProfile,
@@ -21,6 +22,7 @@ interface HeaderProps {
   profile: MinecraftProfile | null;
   activeModpack: ModpackProfile | null;
   activeTab: WorkspaceTab;
+  serverCount?: number;
   onChangeTab: (tab: WorkspaceTab) => void;
   onOpenSettings: () => void;
   onLogin: () => void;
@@ -37,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   profile,
   activeModpack,
   activeTab,
+  serverCount = 0,
   onChangeTab,
   onOpenSettings,
   onLogin,
@@ -79,7 +82,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Center: Segmented Workspace Switcher (Play | Mods | Console) */}
+      {/* Center: Segmented Workspace Switcher (Dashboard | Mods | Servers (N) | Console) */}
       <div className="flex items-center bg-[#0c1018] p-1 rounded-xl border border-[#263449] shadow-inner">
         <button
           onClick={() => onChangeTab("play")}
@@ -102,8 +105,22 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           <Package className="w-3.5 h-3.5" />
-          <span>Mods</span>
+          <span>Content</span>
         </button>
+
+        {serverCount > 0 && (
+          <button
+            onClick={() => onChangeTab("servers")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer ${
+              activeTab === "servers"
+                ? "bg-gradient-to-r from-[#0d949b] to-[#12c3ca] text-slate-950 shadow-md"
+                : "text-[#8fa0bc] hover:text-[#e4e8ee]"
+            }`}
+          >
+            <Server className="w-3.5 h-3.5" />
+            <span>Servers ({serverCount})</span>
+          </button>
+        )}
 
         <button
           onClick={() => onChangeTab("console")}

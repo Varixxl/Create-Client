@@ -10,6 +10,8 @@ import { ProfileSidebar } from "./components/ProfileSidebar";
 import { ProfileModal, ProfileModalMode } from "./components/ProfileModal";
 import { ModsPanel } from "./components/ModsPanel";
 import { ConsolePanel } from "./components/ConsolePanel";
+import { ServerStatusPanel } from "./components/ServerStatusPanel";
+import { CreateServerModal } from "./components/CreateServerModal";
 import {
   Play,
   Flame,
@@ -27,6 +29,7 @@ import {
   HardDrive,
   Camera,
   RefreshCw,
+  Server,
 } from "lucide-react";
 import {
   AppConfig,
@@ -40,6 +43,7 @@ import {
   ModpackProfile,
   ProfilesState,
   WorkspaceTab,
+  ServerInstance,
 } from "./types";
 
 export const App: React.FC = () => {
@@ -79,16 +83,22 @@ export const App: React.FC = () => {
   const [modalTargetProfile, setModalTargetProfile] = useState<ModpackProfile | null>(null);
   const [profileToDelete, setProfileToDelete] = useState<ModpackProfile | null>(null);
 
+  // Dedicated Server State
+  const [servers, setServers] = useState<ServerInstance[]>([]);
+  const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false);
+
   const activeModpack: ModpackProfile | null =
     profilesState?.profiles.find((p) => p.id === profilesState.selected_profile_id) ||
     profilesState?.profiles[0] ||
     null;
 
   const isCreateServerProfile = !activeModpack || activeModpack.id === "create-server";
+  const profileServers = servers.filter((s) => s.profile_id === activeModpack?.id);
 
   useEffect(() => {
     loadConfig();
     loadProfiles();
+    loadServers();
     checkAuth();
     refreshServer();
     handleCheckAllUpdates(false);
@@ -143,6 +153,15 @@ export const App: React.FC = () => {
     }
   };
 
+  const loadServers = async () => {
+    try {
+      const list = await invoke<ServerInstance[]>("get_all_servers");
+      setServers(list || []);
+    } catch (err) {
+      console.error("Failed to load servers:", err);
+    }
+  };
+
   const handleSelectProfile = async (profileId: string) => {
     try {
       const state = await invoke<ProfilesState>("select_profile", { profileId });
@@ -157,6 +176,7 @@ export const App: React.FC = () => {
     name: string;
     description: string;
     loader: string;
+    loaderVersion?: string;
     mcVersion: string;
     includeDefaultFabricMods: boolean;
     ramGb: number | null;
@@ -167,6 +187,7 @@ export const App: React.FC = () => {
         name: data.name,
         description: data.description,
         loader: data.loader,
+        loaderVersion: data.loaderVersion || null,
         mcVersion: data.mcVersion,
         includeDefaultFabricMods: data.includeDefaultFabricMods,
         ramGb: data.ramGb,
@@ -517,6 +538,7 @@ export const App: React.FC = () => {
         profile={profile}
         activeModpack={activeModpack}
         activeTab={activeTab}
+        serverCount={profileServers.length}
         onChangeTab={setActiveTab}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onLogin={handleLogin}
@@ -534,6 +556,7 @@ export const App: React.FC = () => {
         <ProfileSidebar
           profiles={profilesState?.profiles || []}
           selectedProfileId={profilesState?.selected_profile_id || "create-server"}
+          progress={progress}
           onSelectProfile={handleSelectProfile}
           onCreateProfile={() => {
             setModalTargetProfile(null);
@@ -602,9 +625,23 @@ export const App: React.FC = () => {
             <div className="flex-1 min-h-0 flex flex-col">
               <ModsPanel
                 profile={activeModpack}
+                curseforgeApiKey={config?.curseforge_api_key}
+                onOpenSettings={() => setIsSettingsOpen(true)}
                 onOpenFolder={handleOpenFolder}
                 onSyncProfile={() => handleSyncActiveProfile(false)}
                 isSyncing={isSyncing}
+                onNotify={showToast}
+                onError={(m) => setErrorMsg(m)}
+              />
+            </div>
+          ) : activeTab === "servers" && activeModpack ? (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <ServerStatusPanel
+                profile={activeModpack}
+                servers={servers}
+                onRefreshServers={loadServers}
+                onCreateServer={() => setIsCreateServerModalOpen(true)}
+                onOpenFolder={handleOpenFolder}
                 onNotify={showToast}
                 onError={(m) => setErrorMsg(m)}
               />
@@ -685,8 +722,26 @@ export const App: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-[#12c3ca]/15 hover:bg-[#12c3ca]/25 border border-[#12c3ca]/40 text-[11px] font-bold text-[#5ce1e6] flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <Package className="w-3.5 h-3.5" />
-                      <span>Manage Mods</span>
+                      <span>Manage Content</span>
                     </button>
+
+                    <button
+                      onClick={() => setIsCreateServerModalOpen(true)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[11px] font-bold text-emerald-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Server className="w-3.5 h-3.5" />
+                      <span>Create Server (Beta)</span>
+                    </button>
+
+                    {profileServers.length > 0 && (
+                      <button
+                        onClick={() => setActiveTab("servers")}
+                        className="px-2.5 py-1 rounded-lg bg-[#182232] hover:bg-[#222f43] border border-[#2a384c] text-[11px] font-bold text-[#5ce1e6] flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Server className="w-3.5 h-3.5" />
+                        <span>Servers ({profileServers.length})</span>
+                      </button>
+                    )}
 
                     {activeModpack && (
                       <button
@@ -900,6 +955,21 @@ export const App: React.FC = () => {
         onSaveEdit={handleSaveEditProfile}
         onSaveDuplicate={handleSaveDuplicateProfile}
       />
+
+      {/* Pre-installed Server Creator Modal (Beta) */}
+      {isCreateServerModalOpen && activeModpack && (
+        <CreateServerModal
+          isOpen={isCreateServerModalOpen}
+          profile={activeModpack}
+          onClose={() => setIsCreateServerModalOpen(false)}
+          onServerCreated={(newServer) => {
+            setServers((prev) => [...prev, newServer]);
+            showToast(`Created server "${newServer.name}"!`);
+            setActiveTab("servers");
+          }}
+          onError={(m) => setErrorMsg(m)}
+        />
+      )}
 
       {/* Delete Profile Confirmation Dialog */}
       {profileToDelete && (

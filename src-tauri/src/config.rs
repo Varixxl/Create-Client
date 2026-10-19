@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub release_manifest_url: String,
     #[serde(default = "default_graphics_preset")]
     pub graphics_preset: String,
+    #[serde(default)]
+    pub curseforge_api_key: String,
 }
 
 fn default_graphics_preset() -> String {
@@ -32,6 +34,7 @@ impl Default for AppConfig {
             auto_connect: false,
             release_manifest_url: "https://raw.githubusercontent.com/JaviDaBomb/create-modpack/main/manifest.json".to_string(),
             graphics_preset: default_graphics_preset(),
+            curseforge_api_key: String::new(),
         }
     }
 }

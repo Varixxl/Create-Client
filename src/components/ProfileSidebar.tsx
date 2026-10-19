@@ -8,12 +8,14 @@ import {
   Sliders,
   FolderOpen,
   Trash2,
+  ArrowDownCircle,
 } from "lucide-react";
-import { ModpackProfile } from "../types";
+import { ModpackProfile, ProgressPayload } from "../types";
 
 interface ProfileSidebarProps {
   profiles: ModpackProfile[];
   selectedProfileId: string;
+  progress?: ProgressPayload | null;
   onSelectProfile: (id: string) => void;
   onCreateProfile: () => void;
   onEditProfile: (profile: ModpackProfile) => void;
@@ -26,6 +28,7 @@ interface ProfileSidebarProps {
 export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
   profiles,
   selectedProfileId,
+  progress,
   onSelectProfile,
   onCreateProfile,
   onEditProfile,
@@ -215,8 +218,42 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({
         </div>
       </div>
 
-      {/* Bottom Action: Create New Profile */}
-      <div className="p-3 border-t border-[#1c2636] bg-[#0a0e16]">
+      {/* Bottom Action & Download Progress Bar (Feature 4) */}
+      <div className="p-3 border-t border-[#1c2636] bg-[#0a0e16] space-y-2.5">
+        {progress && progress.percentage < 100 && (
+          <div className="p-2.5 rounded-xl bg-[#111724] border border-[#233247] shadow-inner space-y-1.5 animate-in fade-in duration-200">
+            <div className="flex items-center justify-between text-[11px]">
+              <div className="flex items-center gap-1.5 truncate max-w-[170px] text-[#5ce1e6] font-bold">
+                <ArrowDownCircle className="w-3.5 h-3.5 animate-bounce shrink-0" />
+                <span className="truncate">{progress.task}</span>
+              </div>
+              <span className="font-mono text-[10px] text-[#8fa0bc]">
+                {progress.percentage.toFixed(0)}%
+              </span>
+            </div>
+
+            <div className="w-full h-1.5 rounded-full bg-[#1b2536] overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-[#0d949b] to-[#12c3ca] rounded-full transition-all duration-200"
+                style={{ width: `${Math.min(100, Math.max(0, progress.percentage))}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-[9px] font-mono text-[#8fa0bc]">
+              <span>
+                {progress.total_bytes > 0
+                  ? `${(progress.current_bytes / (1024 * 1024)).toFixed(1)} / ${(progress.total_bytes / (1024 * 1024)).toFixed(1)} MB`
+                  : `${(progress.current_bytes / (1024 * 1024)).toFixed(1)} MB`}
+              </span>
+              {progress.speed_bytes_sec > 0 && (
+                <span className="text-[#5ce1e6]">
+                  {(progress.speed_bytes_sec / (1024 * 1024)).toFixed(1)} MB/s
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <button
           onClick={onCreateProfile}
           disabled={disabled}

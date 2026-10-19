@@ -7,7 +7,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha512};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
@@ -106,6 +106,62 @@ pub struct ModrinthSearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentSearchResult {
+    pub project_id: String,
+    pub slug: String,
+    pub title: String,
+    pub description: String,
+    pub author: String,
+    pub downloads: u64,
+    pub icon_url: Option<String>,
+    pub installed: bool,
+    pub content_type: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModloaderVersionItem {
+    pub version: String,
+    pub stable: bool,
+    pub recommended: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerInstance {
+    pub id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub server_dir: String,
+    pub mc_version: String,
+    pub loader: String,
+    pub loader_version: String,
+    pub host: String,
+    pub created_at: String,
+    pub installed_mods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerDivergenceInfo {
+    pub server_id: String,
+    pub server_name: String,
+    pub profile_mods_count: usize,
+    pub server_mods_count: usize,
+    pub added_to_profile: Vec<String>,
+    pub removed_from_profile: Vec<String>,
+    pub loader_mismatch: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerManifest {
+    pub server_id: String,
+    pub profile_id: String,
+    pub mc_version: String,
+    pub loader: String,
+    pub loader_version: String,
+    pub mods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceLogsPayload {
     pub log_source: String,
     pub lines: Vec<String>,
@@ -145,6 +201,40 @@ pub fn get_shared_meta_dir() -> PathBuf {
 
 fn get_profiles_file_path() -> PathBuf {
     config::get_config_dir().join("profiles.json")
+}
+
+pub fn get_servers_root_dir() -> PathBuf {
+    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "create", "CreateClient") {
+        let dir = proj_dirs.data_dir().join("servers");
+        let _ = fs::create_dir_all(&dir);
+        dir
+    } else {
+        let dir = PathBuf::from("./create_client_servers");
+        let _ = fs::create_dir_all(&dir);
+        dir
+    }
+}
+
+pub fn get_servers_file_path() -> PathBuf {
+    config::get_config_dir().join("servers.json")
+}
+
+pub fn load_servers_state() -> Vec<ServerInstance> {
+    let path = get_servers_file_path();
+    if path.exists() {
+        if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(servers) = serde_json::from_str::<Vec<ServerInstance>>(&content) {
+                return servers;
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn save_servers_state(servers: &[ServerInstance]) -> Result<(), String> {
+    let path = get_servers_file_path();
+    let content = serde_json::to_string_pretty(servers).map_err(|e| e.to_string())?;
+    fs::write(path, content).map_err(|e| e.to_string())
 }
 
 fn build_builtin_create_profile(cfg: &config::AppConfig) -> ModpackProfile {
@@ -288,8 +378,9 @@ fn sanitize_slug(name: &str) -> String {
 pub fn create_profile(
     name: String,
     description: String,
-    mc_version: String,
     loader: String,
+    loader_version: Option<String>,
+    mc_version: String,
     include_default_mods: bool,
     ram_gb: Option<u32>,
     jvm_flags: Option<String>,
@@ -300,8 +391,13 @@ pub fn create_profile(
     }
 
     let normalized_loader = loader.trim().to_lowercase();
-    if normalized_loader != "fabric" && normalized_loader != "vanilla" {
-        return Err("Custom profiles support 'fabric' or 'vanilla' loaders.".to_string());
+    let supported_loaders = ["fabric", "quilt", "forge", "neoforge", "vanilla"];
+    if !supported_loaders.contains(&normalized_loader.as_str()) {
+        return Err(format!(
+            "Unsupported loader '{}'. Supported loaders: {}",
+            loader,
+            supported_loaders.join(", ")
+        ));
     }
 
     let mut state = load_profiles_state();
@@ -315,6 +411,8 @@ pub fn create_profile(
 
     let instance_path = get_instances_root_dir().join(&unique_id);
     fs::create_dir_all(instance_path.join("mods")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(instance_path.join("resourcepacks")).map_err(|e| e.to_string())?;
+    fs::create_dir_all(instance_path.join("shaderpacks")).map_err(|e| e.to_string())?;
     fs::create_dir_all(instance_path.join("config")).map_err(|e| e.to_string())?;
     fs::create_dir_all(instance_path.join("saves")).map_err(|e| e.to_string())?;
 
@@ -334,13 +432,14 @@ pub fn create_profile(
     };
 
     let desc = if description.trim().is_empty() {
-        if normalized_loader == "fabric" {
+        if normalized_loader == "vanilla" {
+            format!("Custom Vanilla Minecraft ({}) instance.", target_mc)
+        } else {
             format!(
-                "Custom Fabric instance ({}) with isolated mods, saves, and configs.",
+                "Custom {} instance ({}) with isolated mods, saves, and configs.",
+                normalized_loader.to_uppercase(),
                 target_mc
             )
-        } else {
-            format!("Custom Vanilla Minecraft ({}) instance.", target_mc)
         }
     } else {
         description.trim().to_string()
@@ -357,7 +456,7 @@ pub fn create_profile(
             Some(target_mc)
         },
         loader: normalized_loader,
-        loader_version: None,
+        loader_version: loader_version.filter(|s| !s.trim().is_empty()),
         instance_dir: instance_path.to_string_lossy().to_string(),
         is_builtin: false,
         ram_gb,
@@ -610,14 +709,14 @@ fn url_encode(input: &str) -> String {
 
 fn build_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("CreateClient/1.1.0 (https://github.com/Varixxl/create-client)")
+        .user_agent("CreateClient/1.2.0 (https://github.com/Varixxl/create-client)")
         .timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| format!("Failed to initialize HTTP client: {}", e))
 }
 
-/// Lists stable Minecraft release versions from Modrinth's tag API for the Profile creation dropdown.
-pub async fn get_available_mc_versions() -> Result<Vec<String>, String> {
+/// Lists Minecraft versions from Modrinth's tag API for the Profile creation dropdown.
+pub async fn get_available_mc_versions(include_snapshots: bool) -> Result<Vec<String>, String> {
     let client = build_http_client()?;
     let tags: Vec<ModrinthGameVersionTag> = client
         .get("https://api.modrinth.com/v2/tag/game_version")
@@ -630,12 +729,198 @@ pub async fn get_available_mc_versions() -> Result<Vec<String>, String> {
 
     let releases: Vec<String> = tags
         .into_iter()
-        .filter(|t| t.version_type == "release")
-        .take(25)
+        .filter(|t| include_snapshots || t.version_type == "release")
+        .take(if include_snapshots { 80 } else { 35 })
         .map(|t| t.version)
         .collect();
 
     Ok(releases)
+}
+
+/// Dynamically queries official modloader metadata endpoints to list compatible loader versions
+pub async fn get_modloader_versions(
+    mc_version: String,
+    loader: String,
+) -> Result<Vec<ModloaderVersionItem>, String> {
+    let client = build_http_client()?;
+    let loader_lower = loader.to_lowercase().trim().to_string();
+
+    match loader_lower.as_str() {
+        "fabric" => {
+            let url = if mc_version != "latest" && !mc_version.is_empty() {
+                format!("https://meta.fabricmc.net/v2/versions/loader/{}", mc_version)
+            } else {
+                "https://meta.fabricmc.net/v2/versions/loader".to_string()
+            };
+
+            let mut list: Vec<ModloaderVersionItem> = Vec::new();
+            if let Ok(res) = client.get(&url).send().await {
+                if res.status().is_success() {
+                    if let Ok(json_arr) = res.json::<serde_json::Value>().await {
+                        if let Some(arr) = json_arr.as_array() {
+                            for (idx, item) in arr.iter().take(30).enumerate() {
+                                let ver = item.get("loader")
+                                    .and_then(|l| l.get("version"))
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| item.get("version").and_then(|v| v.as_str()));
+                                let stable = item.get("loader")
+                                    .and_then(|l| l.get("stable"))
+                                    .and_then(|s| s.as_bool())
+                                    .or_else(|| item.get("stable").and_then(|s| s.as_bool()))
+                                    .unwrap_or(true);
+
+                                if let Some(v_str) = ver {
+                                    list.push(ModloaderVersionItem {
+                                        version: v_str.to_string(),
+                                        stable,
+                                        recommended: idx == 0,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if list.is_empty() {
+                if let Ok(fallback_res) = client.get("https://meta.fabricmc.net/v2/versions/loader").send().await {
+                    if let Ok(json_arr) = fallback_res.json::<serde_json::Value>().await {
+                        if let Some(arr) = json_arr.as_array() {
+                            for (idx, item) in arr.iter().take(30).enumerate() {
+                                if let Some(ver) = item.get("version").and_then(|v| v.as_str()) {
+                                    let stable = item.get("stable").and_then(|s| s.as_bool()).unwrap_or(true);
+                                    list.push(ModloaderVersionItem {
+                                        version: ver.to_string(),
+                                        stable,
+                                        recommended: idx == 0,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(list)
+        }
+        "quilt" => {
+            let url = if mc_version != "latest" && !mc_version.is_empty() {
+                format!("https://meta.quiltmc.org/v3/versions/loader/{}", mc_version)
+            } else {
+                "https://meta.quiltmc.org/v3/versions/loader".to_string()
+            };
+
+            let mut list: Vec<ModloaderVersionItem> = Vec::new();
+            if let Ok(res) = client.get(&url).send().await {
+                if res.status().is_success() {
+                    if let Ok(json_arr) = res.json::<serde_json::Value>().await {
+                        if let Some(arr) = json_arr.as_array() {
+                            for (idx, item) in arr.iter().take(30).enumerate() {
+                                let ver = item.get("loader")
+                                    .and_then(|l| l.get("version"))
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| item.get("version").and_then(|v| v.as_str()));
+                                if let Some(v_str) = ver {
+                                    list.push(ModloaderVersionItem {
+                                        version: v_str.to_string(),
+                                        stable: true,
+                                        recommended: idx == 0,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if list.is_empty() {
+                if let Ok(fallback_res) = client.get("https://meta.quiltmc.org/v3/versions/loader").send().await {
+                    if let Ok(json_arr) = fallback_res.json::<serde_json::Value>().await {
+                        if let Some(arr) = json_arr.as_array() {
+                            for (idx, item) in arr.iter().take(30).enumerate() {
+                                if let Some(ver) = item.get("version").and_then(|v| v.as_str()) {
+                                    list.push(ModloaderVersionItem {
+                                        version: ver.to_string(),
+                                        stable: true,
+                                        recommended: idx == 0,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(list)
+        }
+        "forge" => {
+            let mut list: Vec<ModloaderVersionItem> = Vec::new();
+            if let Ok(res) = client.get("https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json").send().await {
+                if let Ok(json_val) = res.json::<serde_json::Value>().await {
+                    if let Some(promos) = json_val.get("promos").and_then(|p| p.as_object()) {
+                        let rec_key = format!("{}-recommended", mc_version);
+                        let latest_key = format!("{}-latest", mc_version);
+
+                        if let Some(rec) = promos.get(&rec_key).and_then(|v| v.as_str()) {
+                            list.push(ModloaderVersionItem {
+                                version: rec.to_string(),
+                                stable: true,
+                                recommended: true,
+                            });
+                        }
+                        if let Some(latest) = promos.get(&latest_key).and_then(|v| v.as_str()) {
+                            if !list.iter().any(|item| item.version == latest) {
+                                list.push(ModloaderVersionItem {
+                                    version: latest.to_string(),
+                                    stable: true,
+                                    recommended: list.is_empty(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            if list.is_empty() {
+                list.push(ModloaderVersionItem {
+                    version: "47.4.20".to_string(),
+                    stable: true,
+                    recommended: true,
+                });
+            }
+            Ok(list)
+        }
+        "neoforge" => {
+            let mut list: Vec<ModloaderVersionItem> = Vec::new();
+            if let Ok(res) = client.get("https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge").send().await {
+                if let Ok(json_val) = res.json::<serde_json::Value>().await {
+                    if let Some(versions) = json_val.get("versions").and_then(|v| v.as_array()) {
+                        let mc_prefix = if mc_version.starts_with("1.") {
+                            let parts: Vec<&str> = mc_version.split('.').collect();
+                            if parts.len() >= 2 {
+                                format!("{}.{}", parts[1], parts.get(2).unwrap_or(&"0"))
+                            } else {
+                                String::new()
+                            }
+                        } else {
+                            String::new()
+                        };
+
+                        let filtered: Vec<&str> = versions.iter()
+                            .filter_map(|v| v.as_str())
+                            .filter(|v| mc_prefix.is_empty() || v.starts_with(&mc_prefix))
+                            .collect();
+
+                        for (idx, ver) in filtered.into_iter().rev().take(30).enumerate() {
+                            list.push(ModloaderVersionItem {
+                                version: ver.to_string(),
+                                stable: true,
+                                recommended: idx == 0,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(list)
+        }
+        _ => Ok(Vec::new()),
+    }
 }
 
 /// Resolves the newest stable Minecraft release version that is supported by Fabric Loader,
@@ -1469,10 +1754,16 @@ pub fn remove_mod(profile_id: &str, file_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn search_modrinth_mods(
-    profile_id: &str,
-    query: String,
-) -> Result<Vec<ModrinthSearchResult>, String> {
+fn get_content_dir(profile_instance_dir: &str, content_type: &str) -> PathBuf {
+    let base = PathBuf::from(profile_instance_dir);
+    match content_type.to_lowercase().as_str() {
+        "resourcepack" | "resourcepacks" => base.join("resourcepacks"),
+        "shader" | "shaders" | "shaderpack" | "shaderpacks" => base.join("shaderpacks"),
+        _ => base.join("mods"),
+    }
+}
+
+pub fn list_installed_content(profile_id: &str, content_type: &str) -> Result<Vec<InstalledModInfo>, String> {
     let state = load_profiles_state();
     let profile = state
         .profiles
@@ -1480,71 +1771,337 @@ pub async fn search_modrinth_mods(
         .find(|p| p.id == profile_id)
         .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
 
-    let client = build_http_client()?;
-    let mc_ver = match &profile.resolved_mc_version {
-        Some(v) => v.clone(),
-        None if profile.mc_version != "latest" => profile.mc_version.clone(),
-        None => resolve_latest_compatible_mc_version(&client, &profile.modrinth_slugs).await?,
-    };
+    let target_dir = get_content_dir(&profile.instance_dir, content_type);
+    if !target_dir.exists() {
+        let _ = fs::create_dir_all(&target_dir);
+        return Ok(Vec::new());
+    }
 
-    let loader_facet = if profile.loader == "forge" {
-        "forge"
-    } else {
-        "fabric"
-    };
+    let is_mod = matches!(content_type.to_lowercase().as_str(), "mod" | "mods");
+    let index = if is_mod { load_modrinth_index(&target_dir) } else { HashMap::new() };
+    let mut by_filename: HashMap<String, &InstalledModMetadata> = HashMap::new();
+    for meta in index.values() {
+        by_filename.insert(meta.file_name.clone(), meta);
+    }
 
-    let facets = format!(
-        "[[\"categories:{}\"],[\"versions:{}\"],[\"project_type:mod\"]]",
-        loader_facet, mc_ver
-    );
-    let url = format!(
-        "https://api.modrinth.com/v2/search?query={}&facets={}&limit=20",
-        url_encode(query.trim()),
-        url_encode(&facets)
-    );
+    let mut list: Vec<InstalledModInfo> = Vec::new();
+    let entries = fs::read_dir(&target_dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let raw_name = entry.file_name().to_string_lossy().to_string();
+        let (base_name, enabled) = if raw_name.ends_with(".jar") || raw_name.ends_with(".zip") {
+            (raw_name.clone(), true)
+        } else if raw_name.ends_with(".disabled") {
+            let stripped = raw_name.trim_end_matches(".disabled").to_string();
+            (stripped, false)
+        } else {
+            continue;
+        };
 
-    let resp: serde_json::Value = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Modrinth search failed: {}", e))?
-        .json()
-        .await
-        .map_err(|e| format!("Invalid Modrinth search JSON: {}", e))?;
-
-    let mods_dir = PathBuf::from(&profile.instance_dir).join("mods");
-    let index = load_modrinth_index(&mods_dir);
-
-    let mut results = Vec::new();
-    if let Some(hits) = resp["hits"].as_array() {
-        for hit in hits {
-            let slug = hit["slug"].as_str().unwrap_or("").to_string();
-            let project_id = hit["project_id"].as_str().unwrap_or("").to_string();
-            if slug.is_empty() {
-                continue;
-            }
-            let installed = index.contains_key(&slug)
-                || profile.modrinth_slugs.iter().any(|s| s == &slug);
-            results.push(ModrinthSearchResult {
-                project_id,
-                slug,
-                title: hit["title"].as_str().unwrap_or("Unknown Mod").to_string(),
-                description: hit["description"].as_str().unwrap_or("").to_string(),
-                author: hit["author"].as_str().unwrap_or("Unknown").to_string(),
-                downloads: hit["downloads"].as_u64().unwrap_or(0),
-                icon_url: hit["icon_url"].as_str().map(|s| s.to_string()),
-                installed,
+        let size_bytes = path.metadata().map(|m| m.len()).unwrap_or(0);
+        if let Some(meta) = by_filename.get(&base_name) {
+            list.push(InstalledModInfo {
+                file_name: raw_name,
+                title: meta.title.clone(),
+                slug: Some(meta.slug.clone()),
+                version_number: meta.version_number.clone(),
+                description: meta.description.clone(),
+                icon_url: meta.icon_url.clone(),
+                enabled,
+                size_bytes,
+            });
+        } else {
+            let clean_title = base_name
+                .trim_end_matches(".jar")
+                .trim_end_matches(".zip")
+                .replace(['_', '-'], " ");
+            list.push(InstalledModInfo {
+                file_name: raw_name,
+                title: clean_title,
+                slug: None,
+                version_number: "Installed".to_string(),
+                description: format!("Local {} archive.", content_type),
+                icon_url: None,
+                enabled,
+                size_bytes,
             });
         }
     }
-    Ok(results)
+
+    list.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    Ok(list)
 }
 
-pub async fn install_modrinth_mod(
+pub fn toggle_content(profile_id: &str, content_type: &str, file_name: &str, enabled: bool) -> Result<(), String> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid filename.".to_string());
+    }
+    let state = load_profiles_state();
+    let profile = state
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
+
+    let target_dir = get_content_dir(&profile.instance_dir, content_type);
+    let base_name = file_name.trim_end_matches(".disabled");
+    let enabled_path = target_dir.join(base_name);
+    let disabled_path = target_dir.join(format!("{}.disabled", base_name));
+
+    if enabled {
+        if disabled_path.exists() {
+            fs::rename(&disabled_path, &enabled_path).map_err(|e| e.to_string())?;
+        }
+    } else if enabled_path.exists() {
+        fs::rename(&enabled_path, &disabled_path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn remove_content(profile_id: &str, content_type: &str, file_name: &str) -> Result<(), String> {
+    if file_name.contains('/') || file_name.contains('\\') || file_name.contains("..") {
+        return Err("Invalid filename.".to_string());
+    }
+    let mut state = load_profiles_state();
+    let prof_idx = state
+        .profiles
+        .iter()
+        .position(|p| p.id == profile_id)
+        .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
+
+    let target_dir = get_content_dir(&state.profiles[prof_idx].instance_dir, content_type);
+    let base_name = file_name.trim_end_matches(".disabled");
+    let _ = fs::remove_file(target_dir.join(base_name));
+    let _ = fs::remove_file(target_dir.join(format!("{}.disabled", base_name)));
+
+    if matches!(content_type.to_lowercase().as_str(), "mod" | "mods") {
+        let mut index = load_modrinth_index(&target_dir);
+        let mut removed_slug: Option<String> = None;
+        index.retain(|slug, meta| {
+            if meta.file_name == base_name {
+                removed_slug = Some(slug.clone());
+                false
+            } else {
+                true
+            }
+        });
+        save_modrinth_index(&target_dir, &index);
+
+        if let Some(slug) = removed_slug {
+            state.profiles[prof_idx].modrinth_slugs.retain(|s| s != &slug);
+            save_profiles_state(&state)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn search_content(
+    query: String,
+    content_type: String,
+    source: String,
+    mc_version: Option<String>,
+    loader: Option<String>,
+    curseforge_key: Option<String>,
+    profile_id: String,
+) -> Result<Vec<ContentSearchResult>, String> {
+    let state = load_profiles_state();
+    let profile = state
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .cloned();
+
+    let resolved_mc = mc_version
+        .or_else(|| profile.as_ref().and_then(|p| p.resolved_mc_version.clone()))
+        .or_else(|| profile.as_ref().map(|p| p.mc_version.clone()))
+        .filter(|v| v != "latest" && !v.is_empty());
+
+    let resolved_loader = loader
+        .or_else(|| profile.as_ref().map(|p| p.loader.clone()))
+        .unwrap_or_else(|| "fabric".to_string());
+
+    let target_dir = profile
+        .as_ref()
+        .map(|p| get_content_dir(&p.instance_dir, &content_type));
+
+    let installed_files: HashSet<String> = target_dir
+        .as_ref()
+        .and_then(|d| fs::read_dir(d).ok())
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let client = build_http_client()?;
+    let c_type = content_type.to_lowercase();
+    let src = source.to_lowercase();
+
+    if src == "curseforge" {
+        let key = curseforge_key
+            .filter(|k| !k.trim().is_empty())
+            .ok_or_else(|| {
+                "CurseForge API Key not configured. Please add your free CurseForge API key in Settings -> CurseForge to enable CurseForge search and downloads.".to_string()
+            })?;
+
+        let class_id = match c_type.as_str() {
+            "resourcepack" | "resourcepacks" => 12,
+            "shader" | "shaders" | "shaderpack" => 6552,
+            _ => 6, // Mods
+        };
+
+        let mut url = format!(
+            "https://api.curseforge.com/v1/mods/search?gameId=432&classId={}&pageSize=20&sortField=2&sortOrder=desc",
+            class_id
+        );
+        if !query.trim().is_empty() {
+            url.push_str(&format!("&searchFilter={}", url_encode(query.trim())));
+        }
+        if let Some(ref ver) = resolved_mc {
+            url.push_str(&format!("&gameVersion={}", url_encode(ver)));
+        }
+        if class_id == 6 {
+            let loader_type = match resolved_loader.as_str() {
+                "forge" => Some(1),
+                "fabric" => Some(4),
+                "quilt" => Some(5),
+                "neoforge" => Some(6),
+                _ => None,
+            };
+            if let Some(lt) = loader_type {
+                url.push_str(&format!("&modLoaderType={}", lt));
+            }
+        }
+
+        let resp: serde_json::Value = client
+            .get(&url)
+            .header("x-api-key", key.trim())
+            .send()
+            .await
+            .map_err(|e| format!("CurseForge search failed: {}", e))?
+            .json()
+            .await
+            .map_err(|e| format!("Invalid CurseForge response: {}", e))?;
+
+        let mut results = Vec::new();
+        if let Some(data) = resp["data"].as_array() {
+            for item in data {
+                let project_id = item["id"].to_string();
+                let slug = item["slug"].as_str().unwrap_or("").to_string();
+                let title = item["name"].as_str().unwrap_or("Unknown").to_string();
+                let description = item["summary"].as_str().unwrap_or("").to_string();
+                let author = item["authors"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|a| a["name"].as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let downloads = item["downloadCount"].as_u64().unwrap_or(0);
+                let icon_url = item["logo"]["thumbnailUrl"]
+                    .as_str()
+                    .or_else(|| item["logo"]["url"].as_str())
+                    .map(|s| s.to_string());
+
+                let slug_lower = slug.to_lowercase();
+                let installed = installed_files.iter().any(|f| f.contains(&slug_lower));
+
+                results.push(ContentSearchResult {
+                    project_id,
+                    slug,
+                    title,
+                    description,
+                    author,
+                    downloads,
+                    icon_url,
+                    installed,
+                    content_type: c_type.clone(),
+                    source: "curseforge".to_string(),
+                });
+            }
+        }
+        Ok(results)
+    } else {
+        // Modrinth search
+        let project_type = match c_type.as_str() {
+            "resourcepack" | "resourcepacks" => "resourcepack",
+            "shader" | "shaders" | "shaderpack" => "shader",
+            _ => "mod",
+        };
+
+        let mut facets_arr = vec![format!("[\"project_type:{}\"]", project_type)];
+        if let Some(ref ver) = resolved_mc {
+            facets_arr.push(format!("[\"versions:{}\"]", ver));
+        }
+        if project_type == "mod" && resolved_loader != "vanilla" {
+            facets_arr.push(format!("[\"categories:{}\"]", resolved_loader));
+        }
+        let facets_str = format!("[{}]", facets_arr.join(","));
+
+        let url = format!(
+            "https://api.modrinth.com/v2/search?query={}&facets={}&limit=20",
+            url_encode(query.trim()),
+            url_encode(&facets_str)
+        );
+
+        let resp: serde_json::Value = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("Modrinth search failed: {}", e))?
+            .json()
+            .await
+            .map_err(|e| format!("Invalid Modrinth response: {}", e))?;
+
+        let mut results = Vec::new();
+        if let Some(hits) = resp["hits"].as_array() {
+            for hit in hits {
+                let project_id = hit["project_id"].as_str().unwrap_or("").to_string();
+                let slug = hit["slug"].as_str().unwrap_or("").to_string();
+                if slug.is_empty() {
+                    continue;
+                }
+                let title = hit["title"].as_str().unwrap_or("Unknown").to_string();
+                let description = hit["description"].as_str().unwrap_or("").to_string();
+                let author = hit["author"].as_str().unwrap_or("Unknown").to_string();
+                let downloads = hit["downloads"].as_u64().unwrap_or(0);
+                let icon_url = hit["icon_url"].as_str().map(|s| s.to_string());
+
+                let slug_lower = slug.to_lowercase();
+                let installed = installed_files.iter().any(|f| f.contains(&slug_lower));
+
+                results.push(ContentSearchResult {
+                    project_id,
+                    slug,
+                    title,
+                    description,
+                    author,
+                    downloads,
+                    icon_url,
+                    installed,
+                    content_type: c_type.clone(),
+                    source: "modrinth".to_string(),
+                });
+            }
+        }
+        Ok(results)
+    }
+}
+
+pub async fn install_content(
     app: &AppHandle,
     profile_id: &str,
-    slug: String,
-) -> Result<(), String> {
+    project_id: &str,
+    _version_id: Option<&str>,
+    content_type: &str,
+    source: &str,
+    curseforge_key: Option<&str>,
+) -> Result<String, String> {
     let mut state = load_profiles_state();
     let prof_idx = state
         .profiles
@@ -1557,37 +2114,627 @@ pub async fn install_modrinth_mod(
     let mc_ver = match &profile.resolved_mc_version {
         Some(v) => v.clone(),
         None if profile.mc_version != "latest" => profile.mc_version.clone(),
-        None => resolve_latest_compatible_mc_version(&client, &profile.modrinth_slugs).await?,
+        None => "1.20.1".to_string(),
     };
 
-    let mods_dir = PathBuf::from(&profile.instance_dir).join("mods");
-    fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
+    let target_dir = get_content_dir(&profile.instance_dir, content_type);
+    fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
 
-    let loader_name = if profile.loader == "forge" {
-        "forge"
+    let is_mod = matches!(content_type.to_lowercase().as_str(), "mod" | "mods");
+
+    if source.eq_ignore_ascii_case("curseforge") {
+        let key = curseforge_key
+            .filter(|k| !k.trim().is_empty())
+            .ok_or_else(|| "CurseForge API Key required for CurseForge downloads.".to_string())?;
+
+        let files_url = format!("https://api.curseforge.com/v1/mods/{}/files", project_id);
+        let resp: serde_json::Value = client
+            .get(&files_url)
+            .header("x-api-key", key.trim())
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch CurseForge files: {}", e))?
+            .json()
+            .await
+            .map_err(|e| format!("Invalid CurseForge files JSON: {}", e))?;
+
+        let files = resp["data"]
+            .as_array()
+            .ok_or_else(|| "No files found for CurseForge project".to_string())?;
+
+        let chosen_file = files
+            .iter()
+            .find(|f| {
+                if let Some(arr) = f["gameVersions"].as_array() {
+                    arr.iter().any(|v| v.as_str() == Some(&mc_ver))
+                } else {
+                    false
+                }
+            })
+            .or_else(|| files.first())
+            .ok_or_else(|| "No compatible file found on CurseForge".to_string())?;
+
+        let file_id = chosen_file["id"].as_u64().unwrap_or(0);
+        let file_name = chosen_file["fileName"]
+            .as_str()
+            .ok_or_else(|| "CurseForge file missing fileName".to_string())?;
+
+        let download_url = chosen_file["downloadUrl"]
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                format!(
+                    "https://edge.forgecdn.net/files/{}/{}/{}",
+                    file_id / 1000,
+                    file_id % 1000,
+                    file_name
+                )
+            });
+
+        let mut sha1: Option<&str> = None;
+        if let Some(hashes) = chosen_file["hashes"].as_array() {
+            for h in hashes {
+                if h["algo"].as_u64() == Some(1) {
+                    sha1 = h["value"].as_str();
+                    break;
+                }
+            }
+        }
+
+        emit_progress(app, &format!("Downloading {}...", file_name), 0, 100, 20.0, 0);
+        let dest = target_dir.join(file_name);
+        download_file_verified(&client, &download_url, &dest, sha1, None).await?;
+        emit_progress(app, "Installation complete!", 100, 100, 100.0, 0);
+
+        Ok(file_name.to_string())
     } else {
-        "fabric"
-    };
+        // Modrinth install
+        let mut ver_url = format!("https://api.modrinth.com/v2/project/{}/version?", project_id);
+        if is_mod && profile.loader != "vanilla" {
+            ver_url.push_str(&format!("loaders=%5B%22{}%22%5D&", profile.loader));
+        }
+        ver_url.push_str(&format!("game_versions=%5B%22{}%22%5D", mc_ver));
 
-    sync_modrinth_mods_for_instance(
-        app,
-        &client,
-        &mods_dir,
-        &mc_ver,
-        loader_name,
-        &[slug.clone()],
-        false,
+        let versions_resp = client.get(&ver_url).send().await;
+        let mut vers: Vec<ModrinthVersion> = match versions_resp {
+            Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
+            _ => Vec::new(),
+        };
+
+        if vers.is_empty() {
+            let fallback_url = format!("https://api.modrinth.com/v2/project/{}/version", project_id);
+            if let Ok(r) = client.get(&fallback_url).send().await {
+                if r.status().is_success() {
+                    vers = r.json().await.unwrap_or_default();
+                }
+            }
+        }
+
+        let chosen_ver = vers
+            .first()
+            .ok_or_else(|| format!("No compatible Modrinth version found for project '{}'", project_id))?;
+
+        let primary_file = chosen_ver
+            .files
+            .iter()
+            .find(|f| f.primary == Some(true))
+            .or_else(|| chosen_ver.files.first())
+            .ok_or_else(|| "No downloadable file found in version".to_string())?;
+
+        let dest = target_dir.join(&primary_file.filename);
+        emit_progress(app, &format!("Downloading {}...", primary_file.filename), 0, primary_file.size, 20.0, 0);
+        download_file_verified(
+            &client,
+            &primary_file.url,
+            &dest,
+            primary_file.hashes.sha1.as_deref(),
+            primary_file.hashes.sha512.as_deref(),
+        )
+        .await?;
+
+        if is_mod {
+            if !state.profiles[prof_idx].modrinth_slugs.contains(&project_id.to_string()) {
+                state.profiles[prof_idx].modrinth_slugs.push(project_id.to_string());
+            }
+            let _ = save_profiles_state(&state);
+        }
+
+        emit_progress(app, "Installation complete!", 100, 100, 100.0, 0);
+        Ok(primary_file.filename.clone())
+    }
+}
+
+pub async fn search_modrinth_mods(
+    profile_id: &str,
+    query: String,
+) -> Result<Vec<ModrinthSearchResult>, String> {
+    let res = search_content(
+        query,
+        "mod".to_string(),
+        "modrinth".to_string(),
+        None,
+        None,
+        None,
+        profile_id.to_string(),
     )
     .await?;
 
-    if !state.profiles[prof_idx].modrinth_slugs.contains(&slug) {
-        state.profiles[prof_idx].modrinth_slugs.push(slug);
-    }
-    if state.profiles[prof_idx].resolved_mc_version.is_none() {
-        state.profiles[prof_idx].resolved_mc_version = Some(mc_ver);
-    }
-    save_profiles_state(&state)?;
+    Ok(res
+        .into_iter()
+        .map(|r| ModrinthSearchResult {
+            project_id: r.project_id,
+            slug: r.slug,
+            title: r.title,
+            description: r.description,
+            author: r.author,
+            downloads: r.downloads,
+            icon_url: r.icon_url,
+            installed: r.installed,
+        })
+        .collect())
+}
+
+pub async fn install_modrinth_mod(
+    app: &AppHandle,
+    profile_id: &str,
+    slug: String,
+) -> Result<(), String> {
+    install_content(app, profile_id, &slug, None, "mod", "modrinth", None).await?;
     Ok(())
+}
+
+// ============================================================================
+// Server Creator (Beta), Divergence Check & Synchronization
+// ============================================================================
+
+pub fn is_client_only_mod(jar_path: &Path) -> bool {
+    let file_name_lower = jar_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    const CLIENT_KEYWORDS: &[&str] = &[
+        "sodium", "iris", "fancymenu", "drippyloadingscreen", "drippy", "zoomify",
+        "xaerominimap", "xaeroworldmap", "xaero", "rubidium", "oculus", "embeddium",
+        "entityculling", "immediatelyfast", "modmenu", "cloth-config", "customskinloader",
+        "presencefootsteps", "soundphysics", "resourcify", "controlling", "searchables",
+        "configured", "catalogue", "appleskin", "wthit", "jade", "notenoughanimations",
+        "dynamiccrosshair", "fallingleaves", "ambientenvironment", "visuality", "continuity",
+        "lambdynamiclights", "craftingtweaks", "invmove", "chatheads", "replanter",
+        "betterf3", "borderless", "waveycapes", "raised", "reeses-sodium-options"
+    ];
+
+    for kw in CLIENT_KEYWORDS {
+        if file_name_lower.contains(kw) {
+            return true;
+        }
+    }
+
+    if let Ok(file) = fs::File::open(jar_path) {
+        if let Ok(mut archive) = zip::ZipArchive::new(file) {
+            if let Ok(mut mod_json) = archive.by_name("fabric.mod.json") {
+                let mut content = String::new();
+                if mod_json.read_to_string(&mut content).is_ok() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(env) = val.get("environment").and_then(|v| v.as_str()) {
+                            if env.eq_ignore_ascii_case("client") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Ok(mut toml) = archive.by_name("META-INF/mods.toml") {
+                let mut content = String::new();
+                if toml.read_to_string(&mut content).is_ok() {
+                    let upper = content.to_uppercase();
+                    if upper.contains("CLIENT")
+                        && (upper.contains("SIDE = \"CLIENT\"")
+                            || upper.contains("SIDE=\"CLIENT\"")
+                            || upper.contains("DISPLAYTEST=\"IGNORE_SERVER_VERSION\"")
+                            || upper.contains("DISPLAYTEST = \"IGNORE_SERVER_VERSION\""))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+pub async fn create_server_for_profile(
+    app: &AppHandle,
+    profile_id: &str,
+    server_name: &str,
+) -> Result<ServerInstance, String> {
+    let state = load_profiles_state();
+    let profile = state
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .ok_or_else(|| format!("Profile '{}' not found.", profile_id))?;
+
+    let mc_ver = match &profile.resolved_mc_version {
+        Some(v) => v.clone(),
+        None if profile.mc_version != "latest" => profile.mc_version.clone(),
+        None => "1.20.1".to_string(),
+    };
+
+    let loader = if profile.loader.is_empty() {
+        "fabric".to_string()
+    } else {
+        profile.loader.clone()
+    };
+
+    let loader_ver = if let Some(ref lv) = profile.loader_version {
+        lv.clone()
+    } else {
+        let versions = get_modloader_versions(mc_ver.clone(), loader.clone())
+            .await
+            .unwrap_or_default();
+        versions
+            .first()
+            .map(|v| v.version.clone())
+            .unwrap_or_else(|| {
+                if loader == "fabric" {
+                    "0.16.9".to_string()
+                } else if loader == "forge" {
+                    "47.4.20".to_string()
+                } else {
+                    "latest".to_string()
+                }
+            })
+    };
+
+    let server_id = format!("server-{}", rand::random::<u32>());
+    let server_dir = get_servers_root_dir().join(&server_id);
+    fs::create_dir_all(server_dir.join("mods")).map_err(|e| e.to_string())?;
+
+    let client = build_http_client()?;
+    let server_jar_path = server_dir.join("server.jar");
+    emit_progress(
+        app,
+        &format!("Downloading {} Dedicated Server...", loader.to_uppercase()),
+        0,
+        100,
+        10.0,
+        0,
+    );
+
+    if loader == "fabric" {
+        let installer_ver = if let Ok(resp) = client
+            .get("https://meta.fabricmc.net/v2/versions/installer")
+            .send()
+            .await
+        {
+            if let Ok(arr) = resp.json::<serde_json::Value>().await {
+                arr.as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|i| i["version"].as_str())
+                    .unwrap_or("1.1.2")
+                    .to_string()
+            } else {
+                "1.1.2".to_string()
+            }
+        } else {
+            "1.1.2".to_string()
+        };
+
+        let fabric_server_url = format!(
+            "https://meta.fabricmc.net/v2/versions/loader/{}/{}/{}/server/jar",
+            mc_ver, loader_ver, installer_ver
+        );
+        download_file_verified(&client, &fabric_server_url, &server_jar_path, None, None).await?;
+    } else {
+        let mojang_manifest: serde_json::Value = client
+            .get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch Mojang version manifest: {}", e))?
+            .json()
+            .await
+            .map_err(|e| format!("Invalid Mojang manifest: {}", e))?;
+
+        let mut pkg_url: Option<String> = None;
+        if let Some(arr) = mojang_manifest["versions"].as_array() {
+            for item in arr {
+                if item["id"].as_str() == Some(&mc_ver) {
+                    pkg_url = item["url"].as_str().map(|s| s.to_string());
+                    break;
+                }
+            }
+        }
+        let pkg_url = pkg_url.ok_or_else(|| {
+            format!("Minecraft version '{}' not found in Mojang manifest", mc_ver)
+        })?;
+        let pkg_json: serde_json::Value = client
+            .get(&pkg_url)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch version package: {}", e))?
+            .json()
+            .await
+            .map_err(|e| format!("Invalid version package json: {}", e))?;
+
+        let srv_download = &pkg_json["downloads"]["server"];
+        let srv_url = srv_download["url"]
+            .as_str()
+            .ok_or_else(|| "Server download URL missing".to_string())?;
+        let srv_sha1 = srv_download["sha1"].as_str();
+        download_file_verified(&client, srv_url, &server_jar_path, srv_sha1, None).await?;
+    }
+
+    // Filter and copy server-compatible mods from profile instance
+    let profile_mods_dir = PathBuf::from(&profile.instance_dir).join("mods");
+    let mut copied_mods: Vec<String> = Vec::new();
+    if profile_mods_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&profile_mods_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".jar") && !is_client_only_mod(&path) {
+                        let dest = server_dir.join("mods").join(&name);
+                        if fs::copy(&path, &dest).is_ok() {
+                            copied_mods.push(name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fs::write(server_dir.join("eula.txt"), "eula=true\n").map_err(|e| e.to_string())?;
+
+    let server_props = format!(
+        "# Minecraft Server Properties (Pre-configured by Create Client)\n\
+        server-port=25565\n\
+        motd={}\n\
+        difficulty=easy\n\
+        gamemode=survival\n\
+        max-players=20\n\
+        online-mode=true\n\
+        enable-command-block=true\n\
+        spawn-protection=0\n\
+        view-distance=10\n\
+        simulation-distance=10\n",
+        server_name
+    );
+    fs::write(server_dir.join("server.properties"), server_props).map_err(|e| e.to_string())?;
+
+    let run_sh = "#!/usr/bin/env bash\n\
+        cd \"$(dirname \"$0\")\"\n\
+        JAVA_CMD=\"java\"\n\
+        if [ -n \"$JAVA_HOME\" ] && [ -x \"$JAVA_HOME/bin/java\" ]; then\n\
+            JAVA_CMD=\"$JAVA_HOME/bin/java\"\n\
+        fi\n\
+        echo \"Starting Dedicated Server...\"\n\
+        \"$JAVA_CMD\" -Xmx4G -Xms2G -jar server.jar nogui\n";
+    let run_sh_path = server_dir.join("run.sh");
+    fs::write(&run_sh_path, run_sh).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&run_sh_path, fs::Permissions::from_mode(0o755));
+    }
+
+    let run_bat = "@echo off\r\n\
+        cd /d \"%~dp0\"\r\n\
+        echo Starting Dedicated Server...\r\n\
+        java -Xmx4G -Xms2G -jar server.jar nogui\r\n\
+        pause\r\n";
+    fs::write(server_dir.join("run.bat"), run_bat).map_err(|e| e.to_string())?;
+
+    let manifest = ServerManifest {
+        server_id: server_id.clone(),
+        profile_id: profile.id.clone(),
+        mc_version: mc_ver.clone(),
+        loader: loader.clone(),
+        loader_version: loader_ver.clone(),
+        mods: copied_mods.clone(),
+    };
+    let manifest_json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(server_dir.join("server_manifest.json"), manifest_json).map_err(|e| e.to_string())?;
+
+    let mut servers = load_servers_state();
+    let new_instance = ServerInstance {
+        id: server_id,
+        profile_id: profile.id.clone(),
+        name: server_name.to_string(),
+        server_dir: server_dir.to_string_lossy().to_string(),
+        mc_version: mc_ver,
+        loader,
+        loader_version: loader_ver,
+        host: "127.0.0.1:25565".to_string(),
+        created_at: format!("{}", now_unix()),
+        installed_mods: copied_mods,
+    };
+    servers.push(new_instance.clone());
+    save_servers_state(&servers)?;
+    emit_progress(app, "Server creation completed!", 100, 100, 100.0, 0);
+
+    Ok(new_instance)
+}
+
+pub fn check_server_profile_divergence(server_id: &str) -> Result<ServerDivergenceInfo, String> {
+    let servers = load_servers_state();
+    let server = servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("Server '{}' not found", server_id))?;
+
+    let profiles = load_profiles_state();
+    let profile = profiles
+        .profiles
+        .iter()
+        .find(|p| p.id == server.profile_id)
+        .ok_or_else(|| format!("Associated profile '{}' not found", server.profile_id))?;
+
+    let profile_mods_dir = PathBuf::from(&profile.instance_dir).join("mods");
+    let mut profile_mods = HashSet::new();
+    if profile_mods_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&profile_mods_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".jar") && !is_client_only_mod(&p) {
+                        profile_mods.insert(name);
+                    }
+                }
+            }
+        }
+    }
+
+    let server_mods_dir = PathBuf::from(&server.server_dir).join("mods");
+    let mut server_mods = HashSet::new();
+    if server_mods_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&server_mods_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if name.ends_with(".jar") {
+                        server_mods.insert(name);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut added_to_profile: Vec<String> = profile_mods
+        .difference(&server_mods)
+        .cloned()
+        .collect();
+    let mut removed_from_profile: Vec<String> = server_mods
+        .difference(&profile_mods)
+        .cloned()
+        .collect();
+
+    added_to_profile.sort();
+    removed_from_profile.sort();
+
+    let loader_mismatch = profile.loader != server.loader;
+
+    Ok(ServerDivergenceInfo {
+        server_id: server.id.clone(),
+        server_name: server.name.clone(),
+        profile_mods_count: profile_mods.len(),
+        server_mods_count: server_mods.len(),
+        added_to_profile,
+        removed_from_profile,
+        loader_mismatch,
+    })
+}
+
+pub async fn sync_server_with_profile(
+    app: &AppHandle,
+    server_id: &str,
+) -> Result<String, String> {
+    let div = check_server_profile_divergence(server_id)?;
+    let mut servers = load_servers_state();
+    let s_idx = servers
+        .iter()
+        .position(|s| s.id == server_id)
+        .ok_or_else(|| format!("Server '{}' not found", server_id))?;
+
+    let profiles = load_profiles_state();
+    let profile = profiles
+        .profiles
+        .iter()
+        .find(|p| p.id == servers[s_idx].profile_id)
+        .ok_or_else(|| "Associated profile not found".to_string())?;
+
+    let server_mods_dir = PathBuf::from(&servers[s_idx].server_dir).join("mods");
+    let profile_mods_dir = PathBuf::from(&profile.instance_dir).join("mods");
+    fs::create_dir_all(&server_mods_dir).map_err(|e| e.to_string())?;
+
+    emit_progress(app, "Syncing server mods...", 0, 100, 30.0, 0);
+
+    for rem in &div.removed_from_profile {
+        let _ = fs::remove_file(server_mods_dir.join(rem));
+    }
+
+    for add in &div.added_to_profile {
+        let src = profile_mods_dir.join(add);
+        let dst = server_mods_dir.join(add);
+        if src.exists() {
+            let _ = fs::copy(&src, &dst);
+        }
+    }
+
+    let mut current_mods = Vec::new();
+    if let Ok(entries) = fs::read_dir(&server_mods_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".jar") {
+                current_mods.push(name);
+            }
+        }
+    }
+    current_mods.sort();
+
+    servers[s_idx].installed_mods = current_mods.clone();
+    save_servers_state(&servers)?;
+
+    let manifest_path = PathBuf::from(&servers[s_idx].server_dir).join("server_manifest.json");
+    let manifest = ServerManifest {
+        server_id: servers[s_idx].id.clone(),
+        profile_id: servers[s_idx].profile_id.clone(),
+        mc_version: servers[s_idx].mc_version.clone(),
+        loader: servers[s_idx].loader.clone(),
+        loader_version: servers[s_idx].loader_version.clone(),
+        mods: current_mods,
+    };
+    if let Ok(m_json) = serde_json::to_string_pretty(&manifest) {
+        let _ = fs::write(manifest_path, m_json);
+    }
+
+    emit_progress(app, "Server mods sync completed!", 100, 100, 100.0, 0);
+
+    Ok(format!(
+        "Server mods synchronized: {} added, {} removed.",
+        div.added_to_profile.len(),
+        div.removed_from_profile.len()
+    ))
+}
+
+pub fn get_servers_for_profile(profile_id: &str) -> Result<Vec<ServerInstance>, String> {
+    let servers = load_servers_state();
+    Ok(servers
+        .into_iter()
+        .filter(|s| s.profile_id == profile_id)
+        .collect())
+}
+
+pub fn get_all_servers() -> Result<Vec<ServerInstance>, String> {
+    Ok(load_servers_state())
+}
+
+pub fn delete_server(server_id: &str) -> Result<(), String> {
+    let mut servers = load_servers_state();
+    if let Some(srv) = servers.iter().find(|s| s.id == server_id).cloned() {
+        let _ = fs::remove_dir_all(&srv.server_dir);
+    }
+    servers.retain(|s| s.id != server_id);
+    save_servers_state(&servers)?;
+    Ok(())
+}
+
+pub async fn ping_server_instance(server_id: &str) -> Result<crate::pinger::ServerStatus, String> {
+    let servers = load_servers_state();
+    let server = servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| format!("Server '{}' not found", server_id))?;
+
+    let parts: Vec<&str> = server.host.split(':').collect();
+    let host = parts.first().unwrap_or(&"127.0.0.1");
+    let port = parts.get(1).and_then(|p| p.parse::<u16>().ok()).unwrap_or(25565);
+
+    Ok(crate::pinger::ping_server_address(host, port, &server.name).await)
 }
 
 // ============================================================================

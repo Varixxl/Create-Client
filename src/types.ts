@@ -6,6 +6,7 @@ export interface AppConfig {
   auto_connect: boolean;
   release_manifest_url: string;
   graphics_preset: string;
+  curseforge_api_key: string;
 }
 
 export interface GraphicsInfo {
@@ -102,6 +103,22 @@ export interface InstalledModInfo {
   size_bytes: number;
 }
 
+export type ContentType = "mod" | "resourcepack" | "shader";
+export type ContentSource = "modrinth" | "curseforge";
+
+export interface ContentSearchResult {
+  project_id: string;
+  slug: string;
+  title: string;
+  description: string;
+  author: string;
+  downloads: number;
+  icon_url?: string | null;
+  installed: boolean;
+  content_type: ContentType;
+  source: ContentSource;
+}
+
 export interface ModrinthSearchResult {
   project_id: string;
   slug: string;
@@ -113,11 +130,40 @@ export interface ModrinthSearchResult {
   installed: boolean;
 }
 
+export interface ModloaderVersionItem {
+  version: string;
+  stable: boolean;
+  recommended: boolean;
+}
+
+export interface ServerInstance {
+  id: string;
+  profile_id: string;
+  name: string;
+  server_dir: string;
+  mc_version: string;
+  loader: string;
+  loader_version: string;
+  host: string;
+  created_at: string;
+  installed_mods: string[];
+}
+
+export interface ServerDivergenceInfo {
+  server_id: string;
+  server_name: string;
+  profile_mods_count: number;
+  server_mods_count: number;
+  added_to_profile: string[];
+  removed_from_profile: string[];
+  loader_mismatch: boolean;
+}
+
 export interface InstanceLogsPayload {
   log_source: string;
   lines: string[];
   crash_report?: string | null;
 }
 
-export type WorkspaceTab = "play" | "mods" | "console";
+export type WorkspaceTab = "play" | "mods" | "servers" | "console";
 

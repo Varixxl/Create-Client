@@ -41,6 +41,7 @@ fn create_profile(
     name: String,
     description: String,
     loader: String,
+    loader_version: Option<String>,
     mc_version: String,
     include_default_fabric_mods: bool,
     ram_gb: Option<u32>,
@@ -50,6 +51,7 @@ fn create_profile(
         name,
         description,
         loader,
+        loader_version,
         mc_version,
         include_default_fabric_mods,
         ram_gb,
@@ -79,8 +81,16 @@ fn delete_profile(profile_id: String) -> Result<ProfilesState, String> {
 }
 
 #[tauri::command]
-async fn get_available_mc_versions() -> Result<Vec<String>, String> {
-    profiles::get_available_mc_versions().await
+async fn get_available_mc_versions(include_snapshots: Option<bool>) -> Result<Vec<String>, String> {
+    profiles::get_available_mc_versions(include_snapshots.unwrap_or(false)).await
+}
+
+#[tauri::command]
+async fn get_modloader_versions(
+    mc_version: String,
+    loader: String,
+) -> Result<Vec<profiles::ModloaderVersionItem>, String> {
+    profiles::get_modloader_versions(mc_version, loader).await
 }
 
 #[tauri::command]
@@ -171,13 +181,28 @@ fn list_installed_mods(profile_id: String) -> Result<Vec<InstalledModInfo>, Stri
 }
 
 #[tauri::command]
+fn list_installed_content(profile_id: String, content_type: String) -> Result<Vec<InstalledModInfo>, String> {
+    profiles::list_installed_content(&profile_id, &content_type)
+}
+
+#[tauri::command]
 fn toggle_mod(profile_id: String, file_name: String, enabled: bool) -> Result<(), String> {
     profiles::toggle_mod(&profile_id, &file_name, enabled)
 }
 
 #[tauri::command]
+fn toggle_content(profile_id: String, content_type: String, file_name: String, enabled: bool) -> Result<(), String> {
+    profiles::toggle_content(&profile_id, &content_type, &file_name, enabled)
+}
+
+#[tauri::command]
 fn remove_mod(profile_id: String, file_name: String) -> Result<(), String> {
     profiles::remove_mod(&profile_id, &file_name)
+}
+
+#[tauri::command]
+fn remove_content(profile_id: String, content_type: String, file_name: String) -> Result<(), String> {
+    profiles::remove_content(&profile_id, &content_type, &file_name)
 }
 
 #[tauri::command]
@@ -189,12 +214,89 @@ async fn search_modrinth_mods(
 }
 
 #[tauri::command]
+async fn search_content(
+    query: String,
+    content_type: String,
+    source: String,
+    mc_version: Option<String>,
+    loader: Option<String>,
+    curseforge_key: Option<String>,
+    profile_id: String,
+) -> Result<Vec<profiles::ContentSearchResult>, String> {
+    profiles::search_content(query, content_type, source, mc_version, loader, curseforge_key, profile_id).await
+}
+
+#[tauri::command]
 async fn install_modrinth_mod(
     app: AppHandle,
     profile_id: String,
     slug: String,
 ) -> Result<(), String> {
     profiles::install_modrinth_mod(&app, &profile_id, slug).await
+}
+
+#[tauri::command]
+async fn install_content(
+    app: AppHandle,
+    profile_id: String,
+    project_id: String,
+    version_id: Option<String>,
+    content_type: String,
+    source: String,
+    curseforge_key: Option<String>,
+) -> Result<String, String> {
+    profiles::install_content(
+        &app,
+        &profile_id,
+        &project_id,
+        version_id.as_deref(),
+        &content_type,
+        &source,
+        curseforge_key.as_deref(),
+    )
+    .await
+}
+
+#[tauri::command]
+async fn create_server_for_profile(
+    app: AppHandle,
+    profile_id: String,
+    server_name: String,
+) -> Result<profiles::ServerInstance, String> {
+    profiles::create_server_for_profile(&app, &profile_id, &server_name).await
+}
+
+#[tauri::command]
+fn get_servers_for_profile(profile_id: String) -> Result<Vec<profiles::ServerInstance>, String> {
+    profiles::get_servers_for_profile(&profile_id)
+}
+
+#[tauri::command]
+fn get_all_servers() -> Result<Vec<profiles::ServerInstance>, String> {
+    profiles::get_all_servers()
+}
+
+#[tauri::command]
+fn delete_server(server_id: String) -> Result<(), String> {
+    profiles::delete_server(&server_id)
+}
+
+#[tauri::command]
+fn check_server_profile_divergence(server_id: String) -> Result<profiles::ServerDivergenceInfo, String> {
+    profiles::check_server_profile_divergence(&server_id)
+}
+
+#[tauri::command]
+async fn sync_server_with_profile(
+    app: AppHandle,
+    server_id: String,
+) -> Result<String, String> {
+    profiles::sync_server_with_profile(&app, &server_id).await
+}
+
+#[tauri::command]
+async fn ping_server_instance(server_id: String) -> Result<ServerStatus, String> {
+    profiles::ping_server_instance(&server_id).await
 }
 
 #[tauri::command]
@@ -436,13 +538,26 @@ pub fn run() {
             update_profile,
             delete_profile,
             get_available_mc_versions,
+            get_modloader_versions,
             sync_profile,
             launch_profile,
             list_installed_mods,
+            list_installed_content,
             toggle_mod,
+            toggle_content,
             remove_mod,
+            remove_content,
             search_modrinth_mods,
+            search_content,
             install_modrinth_mod,
+            install_content,
+            create_server_for_profile,
+            get_servers_for_profile,
+            get_all_servers,
+            delete_server,
+            check_server_profile_divergence,
+            sync_server_with_profile,
+            ping_server_instance,
             get_instance_logs,
             clear_instance_logs,
             get_auth_status,

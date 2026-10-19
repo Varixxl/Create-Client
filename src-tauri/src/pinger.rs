@@ -75,33 +75,37 @@ async fn read_varint<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<i32, Str
 }
 
 pub async fn query_server_status() -> ServerStatus {
-    match timeout(Duration::from_millis(3500), ping_minecraft_server()).await {
+    ping_server_address(REMOTE_HOST, REMOTE_PORT, SERVER_DISPLAY_NAME).await
+}
+
+pub async fn ping_server_address(host: &str, port: u16, name: &str) -> ServerStatus {
+    match timeout(Duration::from_millis(3500), ping_minecraft_server(host, port, name)).await {
         Ok(Ok(status)) => status,
         Ok(Err(_)) | Err(_) => ServerStatus {
-            server_name: SERVER_DISPLAY_NAME.to_string(),
+            server_name: name.to_string(),
             online: false,
             ping_ms: 0,
             online_players: 0,
             max_players: 0,
             motd: "Offline".to_string(),
-            version: "1.20.1".to_string(),
+            version: "Unknown".to_string(),
         },
     }
 }
 
-async fn ping_minecraft_server() -> Result<ServerStatus, String> {
+async fn ping_minecraft_server(host: &str, port: u16, name: &str) -> Result<ServerStatus, String> {
     let start_time = Instant::now();
-    let mut stream = TcpStream::connect((REMOTE_HOST, REMOTE_PORT))
+    let mut stream = TcpStream::connect((host, port))
         .await
         .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     // 1. Send Handshake Packet (ID 0x00)
     let mut handshake_payload = Vec::new();
     write_varint(&mut handshake_payload, 0x00); // Packet ID
-    write_varint(&mut handshake_payload, 763); // Protocol version for 1.20.1
-    write_varint(&mut handshake_payload, REMOTE_HOST.len() as i32); // Host length
-    handshake_payload.extend_from_slice(REMOTE_HOST.as_bytes()); // Host string
-    handshake_payload.extend_from_slice(&REMOTE_PORT.to_be_bytes()); // Port (u16)
+    write_varint(&mut handshake_payload, 763); // Protocol version for 1.20.1 (works for generic SLP handshake)
+    write_varint(&mut handshake_payload, host.len() as i32); // Host length
+    handshake_payload.extend_from_slice(host.as_bytes()); // Host string
+    handshake_payload.extend_from_slice(&port.to_be_bytes()); // Port (u16)
     write_varint(&mut handshake_payload, 1); // Next state: Status
 
     let mut handshake_packet = Vec::new();
@@ -157,19 +161,19 @@ async fn ping_minecraft_server() -> Result<ServerStatus, String> {
         Some(serde_json::Value::Object(obj)) => {
             obj.get("text")
                 .and_then(|v| v.as_str())
-                .unwrap_or("Create Server")
+                .unwrap_or(name)
                 .to_string()
         }
-        _ => "Create Server".to_string(),
+        _ => name.to_string(),
     };
 
     let version = slp
         .version
         .and_then(|v| v.name)
-        .unwrap_or_else(|| "1.20.1 (Forge)".to_string());
+        .unwrap_or_else(|| "Online".to_string());
 
     Ok(ServerStatus {
-        server_name: SERVER_DISPLAY_NAME.to_string(),
+        server_name: name.to_string(),
         online: true,
         ping_ms: ping_duration,
         online_players,

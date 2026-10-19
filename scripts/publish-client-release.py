@@ -8,7 +8,7 @@ if not TOKEN:
         pass
 
 REPO = 'Varixxl/Create-Client'
-TAG = 'v1.1.0'
+TAG = 'v1.2.0'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -20,29 +20,36 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - Multi-Modpack Profiles, Mod Manager & Live Game Console',
-    'body': """## What's Changed in Create Client v1.1.0
+    'name': f'Create Client {TAG} - Content Manager, Dynamic Loaders & Dedicated Server Creator',
+    'body': """## What's Changed in Create Client v1.2.0
 
-### 📦 Multi-Instance Modpack Profiles & Profile Rail
-- **Custom Modpack Instances:** Create, select, duplicate, edit JVM/RAM overrides, and delete isolated Minecraft profiles directly in Create Client.
-- **Dedicated Directory Isolation:** Each instance maintains its own isolated `mods/`, `config/`, `saves/`, and `options.txt` sandbox.
-- **Pinned Create Server Instance:** The official Create Server profile is permanently pinned and guarded with automated differential delta patch updates.
+### 🧩 Per-Profile Content Manager (Modrinth & CurseForge)
+- **Multi-Source Content Discovery:** Search and install content directly from **Modrinth** and **CurseForge** with a unified, high-speed interface.
+- **Triple Content Support:** Native management for **Mods**, **Resource Packs**, and **Shaders** with isolated directories per instance (`mods/`, `resourcepacks/`, `shaderpacks/`).
+- **User-Configured CurseForge API Key:** Simple, secure integration for personal CurseForge API keys configurable directly in Settings.
+- **Fixed Image & Icon Rendering:** Resolved WebView CSP restrictions for Modrinth CDN and CurseForge avatars, complete with graceful fallback avatars.
 
-### ⚡ Built-in Fabric Performance & QoL Pack
-- **Instant Modern Fabric Setup:** Launch clean, high-performance vanilla/Fabric gameplay dynamically linked to the latest stable Minecraft and Fabric Loader versions.
-- **12 Curated Optimization Mods:** Automatically downloads and synchronizes top-tier optimization & quality-of-life mods (`Sodium`, `Lithium`, `FerriteCore`, `ImmediatelyFast`, `EntityCulling`, `Mod Menu`, `Cloth Config`, `Jade`, `AppleSkin`, `Xaero's Minimap`, `Zoomify`, `Fabric API`) via Modrinth's API.
+### ⚡ Dynamic Modloader & Version Engine
+- **Universal Loader Support:** Create profiles with **Fabric**, **Quilt**, **Forge**, **NeoForge**, or clean **Vanilla**.
+- **Real-Time Loader Metadata Resolution:** Queries official loader metadata APIs to fetch recommended and stable loader builds automatically.
+- **Snapshot & Pre-Release Support:** 1-click toggle to browse and install Minecraft snapshots and pre-releases alongside stable releases.
 
-### 🧩 Per-Profile Mod Manager & Modrinth Browser
-- **Direct Mod Control:** View installed mods, toggle `.jar` / `.jar.disabled` states without closing the launcher, and safely delete mods.
-- **Modrinth Search & 1-Click Install:** Browse thousands of compatible Fabric and Forge mods directly inside Create Client with automatic dependency resolution.
+### 🖥️ Pre-Installed Dedicated Server Creator (Beta)
+- **1-Click Dedicated Server Generation:** Generate a ready-to-run dedicated server instance from *any* profile directly in the client.
+- **Smart Client-Only Mod Filtering:** Automatic multi-tier filtering (file heuristics, `fabric.mod.json`, and `META-INF/mods.toml` inspection) removes client-only rendering engines, HUDs, FancyMenu, minimaps, and shaders so the server starts cleanly without crashing.
+- **Ready to Run:** Pre-accepts `eula.txt`, generates optimized start scripts (`run.sh` / `run.bat`), pre-configures `server.properties`, and tracks server manifest.
 
-### 🖥️ Live Game Console & Crash Inspector
-- **Real-Time Stream:** Inspect game output and log events live while Minecraft is running with ALL, WARN+, and ERROR filters.
-- **Crash Detection & Diagnostics:** Automatically scans for crash reports and stacktraces with 1-click Copy Log.
+### 📊 Persistent Sidebar Download Progress
+- **Consistent Progress Tracking:** Download progress bar and status text placed permanently at the bottom of the left sidebar (`ProfileSidebar`), displaying active tasks, progress percentage, current/total size, and real-time transfer speeds in MB/s.
 
-### 🛡️ Security Hardening & Platform Integrity
-- **Frontend CSP:** Enforced strict Content Security Policy for embedded WebViews.
-- **HTTPS & Binary Verification:** Validates GitHub release endpoints, verifies ELF and PE executable headers, and unpacks Linux tarballs safely.""",
+### 🌐 Scoped Server Management Tab (`[Servers (N)]`)
+- **Profile-Scoped Visibility:** Dedicated `[Servers (N)]` workspace tab conditionally appears only on profiles that have created server instances.
+- **Live Server List Ping (SLP):** Real-time server status polling showing Online/Offline status, ping (ms), live online player counts, max capacity, MOTD, and version info.
+- **1-Click Folder Access:** Instant access to open server directories in your system file manager.
+
+### 🔄 Profile Change Detection & Divergence Sync
+- **Automated Divergence Tracking:** Automatically compares profile mods against server mods to detect when mods have been added or removed in the profile.
+- **1-Click Server Sync:** Prominently alerts you when divergence occurs with a 1-click action to sync added and removed mods to the dedicated server instance.""",
     'draft': False,
     'prerelease': False
 }
@@ -61,9 +68,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.1.0-windows-x64.zip', 'Create-Client-1.1.0-windows-x64.zip', 'application/zip'),
+    ('Create-Client-1.2.0-windows-x64.zip', 'Create-Client-1.2.0-windows-x64.zip', 'application/zip'),
     ('create-client', 'create-client', 'application/octet-stream'),
-    ('create-client-1.1.0-linux-x86_64.tar.gz', 'create-client-1.1.0-linux-x86_64.tar.gz', 'application/gzip')
+    ('create-client-1.2.0-linux-x86_64.tar.gz', 'create-client-1.2.0-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:
