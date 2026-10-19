@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+}
+
 @layer base {
   body {
     background-color: #0a0d13;
@@ -9,6 +13,21 @@
     overflow: hidden;
     margin: 0;
     padding: 0;
+    color-scheme: dark;
+  }
+
+  select,
+  option,
+  optgroup {
+    color-scheme: dark;
+    background-color: #0e131d !important;
+    color: #e4e8ee !important;
+  }
+
+  option:checked,
+  option:hover {
+    background-color: #1a2332 !important;
+    color: #12c3ca !important;
   }
 }
 

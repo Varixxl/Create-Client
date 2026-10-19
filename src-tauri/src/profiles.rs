@@ -752,7 +752,7 @@ fn url_encode(input: &str) -> String {
 
 fn build_http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("CreateClient/1.2.1 (https://github.com/Varixxl/create-client)")
+        .user_agent("CreateClient/1.2.2 (https://github.com/Varixxl/create-client)")
         .timeout(std::time::Duration::from_secs(45))
         .build()
         .map_err(|e| format!("Failed to initialize HTTP client: {}", e))

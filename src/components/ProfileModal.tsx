@@ -13,6 +13,7 @@ import {
   Layers,
 } from "lucide-react";
 import { ModpackProfile, ModloaderVersionItem } from "../types";
+import { CustomDropdown } from "./CustomDropdown";
 
 export type ProfileModalMode = "create" | "edit" | "duplicate";
 
@@ -339,18 +340,19 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                           <span>Snapshots</span>
                         </label>
                       </div>
-                      <select
+                      <CustomDropdown
                         value={mcVersion}
-                        onChange={(e) => setMcVersion(e.target.value)}
-                        className="w-full px-3 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none cursor-pointer"
-                      >
-                        <option value="latest">Latest Stable Release (Auto)</option>
-                        {mcVersions.map((ver) => (
-                          <option key={ver} value={ver}>
-                            Minecraft {ver}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => setMcVersion(String(val))}
+                        searchable={true}
+                        placeholder="Select Minecraft Version..."
+                        options={[
+                          { value: "latest", label: "Latest Stable Release (Auto)" },
+                          ...mcVersions.map((ver) => ({
+                            value: ver,
+                            label: `Minecraft ${ver}`,
+                          })),
+                        ]}
+                      />
                     </div>
 
                     {loader !== "vanilla" ? (
@@ -358,18 +360,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                         <label className="text-xs font-bold text-[#c6d0df] block">
                           Loader Version
                         </label>
-                        <select
+                        <CustomDropdown
                           value={loaderVersion}
-                          onChange={(e) => setLoaderVersion(e.target.value)}
-                          className="w-full px-3 py-2.5 rounded-xl bg-[#090d14] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none cursor-pointer"
-                        >
-                          <option value="">Recommended / Latest (Auto)</option>
-                          {loaderVersionsList.map((item) => (
-                            <option key={item.version} value={item.version}>
-                              {item.version} {item.recommended ? "★ (Recommended)" : ""}
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => setLoaderVersion(String(val))}
+                          searchable={loaderVersionsList.length > 8}
+                          placeholder="Recommended / Latest (Auto)"
+                          options={[
+                            { value: "", label: "Recommended / Latest (Auto)" },
+                            ...loaderVersionsList.map((item) => ({
+                              value: item.version,
+                              label: item.version,
+                              recommended: item.recommended,
+                            })),
+                          ]}
+                        />
                       </div>
                     ) : (
                       <div className="space-y-1.5 opacity-60">
@@ -490,20 +494,43 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       </span>
                     )}
                   </div>
-                  <select
+                  <CustomDropdown
                     value={javaVersion ?? 0}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setJavaVersion(val === 0 ? null : val);
+                    onChange={(val) => {
+                      const num = Number(val);
+                      setJavaVersion(num === 0 ? null : num);
                     }}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[#0e131d] border border-[#263042] focus:border-[#12c3ca] text-xs text-[#e4e8ee] outline-none cursor-pointer font-mono"
-                  >
-                    <option value={0}>Auto-detect Compatible Runtime (Recommended)</option>
-                    <option value={17}>Java 17 (Forge 1.20.1 & Minecraft 1.18 - 1.20.4)</option>
-                    <option value={21}>Java 21 (Minecraft 1.20.5 - 1.21.x)</option>
-                    <option value={25}>Java 25 (Minecraft 26.x+ Snapshots)</option>
-                    <option value={8}>Java 8 (Legacy Minecraft 1.7 - 1.16.5)</option>
-                  </select>
+                    placeholder="Auto-detect Compatible Runtime (Recommended)"
+                    options={[
+                      {
+                        value: 0,
+                        label: "Auto-detect Compatible Runtime (Recommended)",
+                        description: "Selects the optimal Adoptium Temurin OpenJDK runtime automatically.",
+                      },
+                      {
+                        value: 17,
+                        label: "Java 17 (Forge 1.20.1 & Minecraft 1.18 - 1.20.4)",
+                        description: "Required for Forge 1.20.1. Automatically omits incompatible Generational ZGC.",
+                        badge: "G1GC Optimized",
+                      },
+                      {
+                        value: 21,
+                        label: "Java 21 (Minecraft 1.20.5 - 1.21.x)",
+                        description: "Modern LTS runtime with Generational ZGC support.",
+                        badge: "ZGC Ready",
+                      },
+                      {
+                        value: 25,
+                        label: "Java 25 (Minecraft 26.x+ Snapshots)",
+                        description: "Bleeding edge JDK runtime.",
+                      },
+                      {
+                        value: 8,
+                        label: "Java 8 (Legacy Minecraft 1.7 - 1.16.5)",
+                        description: "Legacy runtime for classic modpacks.",
+                      },
+                    ]}
+                  />
                   <p className="text-[11px] text-[#8fa0bc] leading-relaxed">
                     {javaVersion === 17 || (!javaVersion && (mcVersion === "1.20.1" || targetProfile?.id === "create-server"))
                       ? "Java 17 runtime selected: Optimized G1GC enabled. Incompatible Generational ZGC (-XX:+ZGenerational) is automatically omitted."
