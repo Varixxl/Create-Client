@@ -12,6 +12,7 @@ import { ModsPanel } from "./components/ModsPanel";
 import { ConsolePanel } from "./components/ConsolePanel";
 import { ServerStatusPanel } from "./components/ServerStatusPanel";
 import { CreateServerModal } from "./components/CreateServerModal";
+import panoramaImg from "./assets/panorama.webp";
 import {
   Play,
   Flame,
@@ -21,7 +22,6 @@ import {
   FileText,
   CheckCircle2,
   FolderOpen,
-  Check,
   Sparkles,
   Square,
   Package,
@@ -532,7 +532,27 @@ export const App: React.FC = () => {
   const effectiveRam = activeModpack?.ram_gb ?? config?.ram_gb ?? 6;
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#0a0d13] text-[#e4e8ee] overflow-hidden font-sans select-none">
+    <div className="flex flex-col h-screen w-screen bg-[#0a0d13] text-[#e4e8ee] overflow-hidden font-sans select-none relative">
+      {/* Seamless Faded Minecraft Panoramic Background Layer */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0">
+        <div className="flex h-full w-max animate-panorama-scroll will-change-transform opacity-25">
+          <img
+            src={panoramaImg}
+            alt=""
+            className="h-full w-auto max-w-none object-cover"
+            draggable={false}
+          />
+          <img
+            src={panoramaImg}
+            alt=""
+            className="h-full w-auto max-w-none object-cover"
+            draggable={false}
+          />
+        </div>
+        {/* Transparent dark atmospheric theme tint */}
+        <div className="absolute inset-0 bg-radial from-[#12c3ca]/5 via-[#0a0d13]/85 to-[#0a0d13]" />
+      </div>
+
       {/* Top Header */}
       <Header
         profile={profile}
@@ -579,46 +599,11 @@ export const App: React.FC = () => {
         />
 
         {/* Right Workspace Content */}
-        <main className="flex-1 relative flex flex-col justify-between p-6 overflow-hidden min-w-0">
-          {/* Background FancyMenu Atmosphere */}
-          <div className="absolute inset-0 bg-radial from-[#12c3ca]/5 via-[#0e121a]/95 to-[#0a0d13] pointer-events-none" />
+        <main className="flex-1 relative z-10 flex flex-col justify-between p-6 overflow-hidden min-w-0">
+          {/* Main Atmosphere Overlay */}
+          <div className="absolute inset-0 bg-radial from-[#12c3ca]/5 via-[#0e121a]/80 to-[#0a0d13]/90 pointer-events-none" />
           <div className="absolute top-0 right-0 w-[550px] h-[550px] bg-[#12c3ca]/5 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-[450px] h-[450px] bg-[#f59e0b]/5 rounded-full blur-3xl pointer-events-none" />
-
-          {/* Toast & Error Notification Banners */}
-          {(updateToast || errorMsg) && (
-            <div className="relative z-20 space-y-2 mb-3 shrink-0">
-              {updateToast && (
-                <div className="p-3 rounded-xl bg-[#12c3ca]/20 border border-[#12c3ca]/50 text-[#5ce1e6] text-xs flex items-center justify-between shadow-xl">
-                  <div className="flex items-center gap-2">
-                    <Check className="w-4 h-4 text-[#12c3ca] shrink-0" />
-                    <span>{updateToast}</span>
-                  </div>
-                  <button
-                    onClick={() => setUpdateToast(null)}
-                    className="text-[#8fa0bc] hover:text-[#e4e8ee] text-xs font-bold px-2 py-0.5 rounded cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              {errorMsg && (
-                <div className="p-3.5 rounded-xl bg-red-950/75 border border-red-500/50 text-red-200 text-xs flex items-center justify-between shadow-xl">
-                  <div className="flex items-center gap-2.5">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span className="whitespace-pre-wrap">{errorMsg}</span>
-                  </div>
-                  <button
-                    onClick={() => setErrorMsg(null)}
-                    className="text-red-400 hover:text-red-200 text-xs font-bold px-2 py-0.5 rounded cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Active Workspace Tab Body */}
           {activeTab === "mods" && activeModpack ? (
@@ -759,11 +744,62 @@ export const App: React.FC = () => {
                   </div>
                 </div>
 
-                <ServerCard
-                  status={serverStatus}
-                  onRefresh={refreshServer}
-                  isLoading={isRefreshingServer}
-                />
+                {isCreateServerProfile ? (
+                  <ServerCard
+                    status={serverStatus}
+                    onRefresh={refreshServer}
+                    isLoading={isRefreshingServer}
+                  />
+                ) : (
+                  <div className="bg-[#0e121af2] border border-[#263042] rounded-xl overflow-hidden shadow-xl backdrop-blur-md min-w-[300px]">
+                    <div className="bg-[#182232] px-3.5 py-2 border-b border-[#263042] flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 font-mono text-xs">
+                        <span className="font-bold text-[#12c3ca]">INSTANCE</span>
+                        <span className="text-[#3a465a]">|</span>
+                        <span className="font-semibold text-[#e4e8ee] truncate max-w-[150px]">
+                          {activeModpack?.name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-[#12c3ca]/15 text-[#5ce1e6] border border-[#12c3ca]/30">
+                        {activeModpack?.loader || "vanilla"}
+                      </span>
+                    </div>
+
+                    <div className="p-3.5 space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-[#8fa0bc]">
+                        <span className="text-[11px]">Minecraft:</span>
+                        <span className="font-mono text-[#e4e8ee] font-medium">
+                          {activeModpack?.mc_version === "latest"
+                            ? `Latest (${activeModpack.resolved_mc_version || "Auto"})`
+                            : activeModpack?.mc_version}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[#8fa0bc]">
+                        <span className="text-[11px]">Allocated RAM:</span>
+                        <span className="font-mono text-[#5ce1e6] font-medium">
+                          {effectiveRam} GB
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[#8fa0bc]">
+                        <span className="text-[11px]">Installed Content:</span>
+                        <span className="font-mono text-amber-300 font-medium">
+                          {activeModpack?.modrinth_slugs?.length ?? 0} Mods
+                        </span>
+                      </div>
+
+                      {profileServers.length > 0 && (
+                        <div className="flex items-center justify-between pt-1 border-t border-[#1c2432] text-[#8fa0bc]">
+                          <span className="text-[11px]">Dedicated Servers:</span>
+                          <span className="font-mono text-emerald-400 font-medium">
+                            {profileServers.length} Instance{profileServers.length > 1 ? "s" : ""}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Bottom Section: Progress Bar & Big Play Button */}
@@ -1034,6 +1070,41 @@ export const App: React.FC = () => {
         onClose={handleCloseLoginModal}
         deviceInfo={deviceInfo}
       />
+
+      {/* Floating Toast / Notification Banners (Non-intrusive, Bottom-Right) */}
+      {(updateToast || errorMsg) && (
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm pointer-events-auto">
+          {updateToast && (
+            <div className="p-3.5 rounded-xl bg-[#0e121af8] border border-[#12c3ca]/60 text-[#5ce1e6] text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2 fade-in duration-200">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="w-4 h-4 text-[#12c3ca] shrink-0" />
+                <span className="truncate">{updateToast}</span>
+              </div>
+              <button
+                onClick={() => setUpdateToast(null)}
+                className="text-[#8fa0bc] hover:text-[#e4e8ee] text-xs font-bold px-2 py-0.5 rounded hover:bg-white/5 cursor-pointer shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="p-3.5 rounded-xl bg-red-950/95 border border-red-500/60 text-red-200 text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2 fade-in duration-200">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span className="line-clamp-2">{errorMsg}</span>
+              </div>
+              <button
+                onClick={() => setErrorMsg(null)}
+                className="text-red-400 hover:text-red-200 text-xs font-bold px-2 py-0.5 rounded hover:bg-white/5 cursor-pointer shrink-0"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -50,3 +50,17 @@
 .fancymenu-glow-gold {
   box-shadow: 0 0 16px rgba(245, 158, 11, 0.25);
 }
+
+@keyframes panorama-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-panorama-scroll {
+  animation: panorama-scroll 120s linear infinite;
+}
+
