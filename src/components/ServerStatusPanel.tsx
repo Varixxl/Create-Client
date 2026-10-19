@@ -112,7 +112,7 @@ export const ServerStatusPanel: React.FC<ServerStatusPanelProps> = ({
   };
 
   return (
-    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0d121c]/90 border border-[#243144] rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md">
+    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0d121c] border border-[#243144] rounded-2xl shadow-2xl overflow-hidden">
       {/* Top Header Toolbar */}
       <div className="px-6 py-4 bg-[#131b29] border-b border-[#243144] flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -308,7 +308,7 @@ export const ServerStatusPanel: React.FC<ServerStatusPanelProps> = ({
 
       {/* Delete Confirmation Modal */}
       {serverToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-sm bg-[#0e131d] border border-rose-500/40 rounded-2xl shadow-2xl p-5 space-y-4">
             <div className="flex items-center gap-2.5 text-rose-400 font-bold text-sm">
               <Trash2 className="w-4 h-4" />

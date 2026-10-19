@@ -26,7 +26,7 @@ export const ServerCard: React.FC<ServerCardProps> = ({
   };
 
   return (
-    <div className="bg-[#0e121af2] border border-[#263042] rounded-xl overflow-hidden shadow-xl backdrop-blur-md min-w-[300px]">
+    <div className="bg-[#0e121af8] border border-[#263042] rounded-xl overflow-hidden shadow-xl min-w-[300px]">
       {/* FancyMenu Top Bar */}
       <div className="bg-[#182232] px-3.5 py-2 border-b border-[#263042] flex items-center justify-between">
         <div className="flex items-center gap-1.5 font-mono text-xs">

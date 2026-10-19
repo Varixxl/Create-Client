@@ -24,8 +24,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="bg-[#0e121af8] border border-[#263042] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-150">
+      <div className="bg-[#0e121a] border border-[#263042] w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col">
         {/* FancyMenu Header Bar */}
         <div className="px-5 py-3.5 bg-[#182232] border-b border-[#263042] flex items-center justify-between shadow-md">
           <div className="flex items-center gap-1.5 font-mono text-xs">

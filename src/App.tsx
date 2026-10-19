@@ -86,6 +86,7 @@ export const App: React.FC = () => {
   // Dedicated Server State
   const [servers, setServers] = useState<ServerInstance[]>([]);
   const [isCreateServerModalOpen, setIsCreateServerModalOpen] = useState(false);
+  const [isWindowFocused, setIsWindowFocused] = useState(true);
 
   const activeModpack: ModpackProfile | null =
     profilesState?.profiles.find((p) => p.id === profilesState.selected_profile_id) ||
@@ -94,6 +95,25 @@ export const App: React.FC = () => {
 
   const isCreateServerProfile = !activeModpack || activeModpack.id === "create-server";
   const profileServers = servers.filter((s) => s.profile_id === activeModpack?.id);
+
+  const isAnyModalOpen =
+    isProfileModalOpen ||
+    isSettingsOpen ||
+    isLoginModalOpen ||
+    isChangelogOpen ||
+    isCreateServerModalOpen ||
+    profileToDelete !== null;
+
+  useEffect(() => {
+    const handleFocus = () => setIsWindowFocused(true);
+    const handleBlur = () => setIsWindowFocused(false);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, []);
 
   useEffect(() => {
     loadConfig();
@@ -539,7 +559,11 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen bg-[#0a0d13] text-[#e4e8ee] overflow-hidden font-sans select-none relative">
       {/* Seamless Faded Minecraft Panoramic Background Layer */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none select-none z-0">
-        <div className="flex h-full w-max animate-panorama-scroll will-change-transform opacity-25">
+        <div
+          className={`flex h-full w-max animate-panorama-scroll opacity-25 ${
+            isAnyModalOpen || !isWindowFocused ? "animation-paused" : ""
+          }`}
+        >
           <img
             src={panoramaImg}
             alt=""
@@ -606,8 +630,6 @@ export const App: React.FC = () => {
         <main className="flex-1 relative z-10 flex flex-col justify-between p-6 overflow-hidden min-w-0">
           {/* Main Atmosphere Overlay */}
           <div className="absolute inset-0 bg-radial from-[#12c3ca]/5 via-[#0e121a]/80 to-[#0a0d13]/90 pointer-events-none" />
-          <div className="absolute top-0 right-0 w-[550px] h-[550px] bg-[#12c3ca]/5 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 left-0 w-[450px] h-[450px] bg-[#f59e0b]/5 rounded-full blur-3xl pointer-events-none" />
 
           {/* Active Workspace Tab Body */}
           {activeTab === "mods" && activeModpack ? (
@@ -755,7 +777,7 @@ export const App: React.FC = () => {
                     isLoading={isRefreshingServer}
                   />
                 ) : (
-                  <div className="bg-[#0e121af2] border border-[#263042] rounded-xl overflow-hidden shadow-xl backdrop-blur-md min-w-[300px]">
+                  <div className="bg-[#0e121af8] border border-[#263042] rounded-xl overflow-hidden shadow-xl min-w-[300px]">
                     <div className="bg-[#182232] px-3.5 py-2 border-b border-[#263042] flex items-center justify-between">
                       <div className="flex items-center gap-1.5 font-mono text-xs">
                         <span className="font-bold text-[#12c3ca]">INSTANCE</span>
@@ -810,7 +832,7 @@ export const App: React.FC = () => {
               <div className="relative z-10 space-y-4 pt-6">
                 {/* Progress / Download Status Bar */}
                 {(isSyncing || progress) && (
-                  <div className="bg-[#0e121af5] border border-[#263042] rounded-xl p-3.5 backdrop-blur-md shadow-xl space-y-2">
+                  <div className="bg-[#0e121afc] border border-[#263042] rounded-xl p-3.5 shadow-xl space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-bold text-[#12c3ca]">
                         {progress?.task || `Syncing ${activeModpack?.name || "modpack"}...`}
@@ -1013,7 +1035,7 @@ export const App: React.FC = () => {
 
       {/* Delete Profile Confirmation Dialog */}
       {profileToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
           <div className="w-full max-w-md bg-[#0e131d] border border-rose-500/40 rounded-2xl p-6 space-y-4 shadow-2xl">
             <h3 className="text-sm font-extrabold text-rose-300 uppercase tracking-wide">
               Delete Modpack Profile?
@@ -1079,7 +1101,7 @@ export const App: React.FC = () => {
       {(updateToast || errorMsg) && (
         <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm pointer-events-auto">
           {updateToast && (
-            <div className="p-3.5 rounded-xl bg-[#0e121af8] border border-[#12c3ca]/60 text-[#5ce1e6] text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <div className="p-3.5 rounded-xl bg-[#0e121afc] border border-[#12c3ca]/60 text-[#5ce1e6] text-xs flex items-center justify-between gap-3 shadow-2xl animate-in slide-in-from-bottom-2 fade-in duration-200">
               <div className="flex items-center gap-2 min-w-0">
                 <CheckCircle2 className="w-4 h-4 text-[#12c3ca] shrink-0" />
                 <span className="truncate">{updateToast}</span>
@@ -1094,7 +1116,7 @@ export const App: React.FC = () => {
           )}
 
           {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-red-950/95 border border-red-500/60 text-red-200 text-xs flex items-center justify-between gap-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-2 fade-in duration-200">
+            <div className="p-3.5 rounded-xl bg-red-950/98 border border-red-500/60 text-red-200 text-xs flex items-center justify-between gap-3 shadow-2xl animate-in slide-in-from-bottom-2 fade-in duration-200">
               <div className="flex items-center gap-2.5 min-w-0">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                 <span className="line-clamp-2">{errorMsg}</span>

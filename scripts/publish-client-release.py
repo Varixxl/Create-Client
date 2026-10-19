@@ -8,7 +8,7 @@ if not TOKEN:
         pass
 
 REPO = 'Varixxl/Create-Client'
-TAG = 'v1.2.3'
+TAG = 'v1.2.4'
 
 headers = {
     'Authorization': f'token {TOKEN}',
@@ -20,20 +20,15 @@ headers = {
 release_payload = {
     'tag_name': TAG,
     'target_commitish': 'main',
-    'name': f'Create Client {TAG} - Removable Stock Profiles & Strict Mod Compatibility',
-    'body': """## What's Changed in Create Client v1.2.3
+    'name': f'Create Client {TAG} - UI Performance Overhaul & Input Latency Fix',
+    'body': """## What's Changed in Create Client v1.2.4
 
-### 🗑️ Removable Stock Profiles & Customization
-- **Delete Built-in Profiles:** Users can now delete any profile including built-in stock profiles (`Create Server` and `Fabric Performance & QoL`).
-- **Persistent Profile Management:** Launcher tracks deleted built-in profile IDs across app restarts so deleted stock profiles are not resurrected.
-- **Editable Names & Descriptions:** Stock profiles can now have their names and descriptions fully edited in the profile settings modal.
-
-### 🛡️ Strict Mod Compatibility Enforcement
-- **Eliminated Incompatible Fallbacks:** Removed legacy fallbacks in Modrinth and CurseForge installation logic that previously downloaded incompatible jars when no exact version match was found.
-- **Strict Minecraft & Loader Checks:** Mod installations strictly enforce exact Minecraft version matching (`resolved_mc_version` / `mc_version`) and loader compatibility (`Forge`, `Fabric`, `Quilt`, `NeoForge`).
-- **Clear Actionable Error Messages:** Attempting to install an incompatible mod returns an explicit, user-friendly error explaining why the mod cannot be installed on the selected profile.
-- **Vanilla Profile Guard:** Mod installs are prohibited on Vanilla Minecraft profiles, with an in-UI warning banner and disabled installation buttons.
-- **Active Profile Scope Badge:** The Mods & Content manager displays an active profile scope indicator badge (`Scope: [Profile Name] | [LOADER] [MC Version]`) showing exactly what Minecraft environment mods are being filtered against.""",
+### ⚡ UI Performance Overhaul & Instant Input Responsiveness
+- **Eliminated Text Field & Modal Lag:** Resolved severe input lag when typing into profile names, descriptions, and search fields by eliminating expensive software backdrop-filter blurs and full-tree re-renders.
+- **Intelligent Background Animation Control:** The continuous 165 FPS background panorama animation now automatically pauses whenever any modal, drawer, or dialog is active, or when the launcher window loses focus—dropping idle CPU/GPU usage to near-zero.
+- **Removed Heavy CSS Filters:** Eliminated all `backdrop-blur-*` and large 64px Gaussian `blur-3xl` layers, replacing them with high-performance solid obsidian panels (`#0a0d13` / `#0e121a`), crisp 1px borders, and drop shadows.
+- **React Component & List Memoization:** Wrapped `CustomDropdown`, `ProfileModal`, `ModsPanel`, `SettingsModal`, and `CreateServerModal` in `React.memo` and memoized version mapping arrays (`useMemo`), preventing unneeded DOM reconciliation on every keystroke.
+- **Linux NVIDIA Wayland Driver Guard:** Automatically sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` in Rust `main.rs` on Linux, resolving known NVIDIA proprietary driver frame pacing stutters and input latency under Wayland/Hyprland.""",
     'draft': False,
     'prerelease': False
 }
@@ -52,9 +47,9 @@ upload_url_base = release_data['upload_url'].split('{')[0]
 
 assets = [
     ('Create-Client.exe', 'Create-Client.exe', 'application/vnd.microsoft.portable-executable'),
-    ('Create-Client-1.2.3-windows-x64.zip', 'Create-Client-1.2.3-windows-x64.zip', 'application/zip'),
+    ('Create-Client-1.2.4-windows-x64.zip', 'Create-Client-1.2.4-windows-x64.zip', 'application/zip'),
     ('create-client', 'create-client', 'application/octet-stream'),
-    ('create-client-1.2.3-linux-x86_64.tar.gz', 'create-client-1.2.3-linux-x86_64.tar.gz', 'application/gzip')
+    ('create-client-1.2.4-linux-x86_64.tar.gz', 'create-client-1.2.4-linux-x86_64.tar.gz', 'application/gzip')
 ]
 
 for file_path, asset_name, content_type in assets:

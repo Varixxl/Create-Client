@@ -60,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
     : "FORGE 1.20.1";
 
   return (
-    <header className="h-16 px-6 bg-[#182232]/95 border-b border-[#2a384c] flex items-center justify-between backdrop-blur-md z-30 shadow-md shrink-0">
+    <header className="h-16 px-6 bg-[#141b27] border-b border-[#243144] flex items-center justify-between z-30 shadow-md shrink-0">
       {/* Left: Brand & Logo */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#1b2536] to-[#0e121a] border border-[#12c3ca]/50 flex items-center justify-center shadow-lg shadow-cyan-950/40">

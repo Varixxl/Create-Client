@@ -16,7 +16,7 @@ interface SettingsModalProps {
 
 const DEFAULT_JVM_FLAGS = "-XX:+UseZGC -XX:+ZGenerational -XX:+AlwaysPreTouch";
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({
+export const SettingsModal: React.FC<SettingsModalProps> = React.memo(({
   isOpen,
   onClose,
   config,
@@ -96,8 +96,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-      <div className="bg-[#0e121af5] border border-[#263042] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+      <div className="bg-[#0e121a] border border-[#263042] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]">
         {/* Modal Header */}
         <div className="px-5 py-3.5 bg-[#182232] border-b border-[#263042] flex items-center justify-between">
           <div className="flex items-center gap-1.5 font-mono text-sm">
@@ -422,4 +422,4 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
     </div>
   );
-};
+});

@@ -110,8 +110,8 @@ export const ChangelogDrawer: React.FC<ChangelogDrawerProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-end bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-xl h-full bg-[#0e121af8] border-l border-[#263042] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+    <div className="fixed inset-0 z-40 flex items-center justify-end bg-black/75">
+      <div className="w-full max-w-xl h-full bg-[#0e121a] border-l border-[#263042] shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
         {/* FancyMenu Header Bar */}
         <div className="bg-[#182232] px-6 py-4 border-b border-[#263042] flex items-center justify-between shadow-md">
           <div className="flex items-center gap-1.5 font-mono text-sm">

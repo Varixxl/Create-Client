@@ -114,7 +114,7 @@ export const ConsolePanel: React.FC<ConsolePanelProps> = ({
   };
 
   return (
-    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0b0f17]/95 border border-[#243144] rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md">
+    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0b0f17] border border-[#243144] rounded-2xl shadow-2xl overflow-hidden">
       {/* Top Console Toolbar */}
       <div className="px-5 py-3 bg-[#131b29] border-b border-[#243144] flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">

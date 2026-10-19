@@ -83,3 +83,7 @@
   animation: panorama-scroll 120s linear infinite;
 }
 
+.animation-paused {
+  animation-play-state: paused !important;
+}
+

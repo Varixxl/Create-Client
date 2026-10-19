@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Search,
@@ -37,7 +37,7 @@ interface ModsPanelProps {
   onError: (msg: string) => void;
 }
 
-export const ModsPanel: React.FC<ModsPanelProps> = ({
+export const ModsPanel: React.FC<ModsPanelProps> = React.memo(({
   profile,
   curseforgeApiKey = "",
   onOpenSettings,
@@ -166,14 +166,21 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
     }
   };
 
-  const filteredInstalled = installedItems.filter(
-    (m) =>
-      m.title.toLowerCase().includes(filterText.toLowerCase()) ||
-      m.file_name.toLowerCase().includes(filterText.toLowerCase()) ||
-      (m.slug && m.slug.toLowerCase().includes(filterText.toLowerCase()))
-  );
+  const filteredInstalled = useMemo(() => {
+    if (!filterText.trim()) return installedItems;
+    const lower = filterText.toLowerCase();
+    return installedItems.filter(
+      (m) =>
+        m.title.toLowerCase().includes(lower) ||
+        m.file_name.toLowerCase().includes(lower) ||
+        (m.slug && m.slug.toLowerCase().includes(lower))
+    );
+  }, [installedItems, filterText]);
 
-  const enabledCount = installedItems.filter((m) => m.enabled).length;
+  const enabledCount = useMemo(
+    () => installedItems.filter((m) => m.enabled).length,
+    [installedItems]
+  );
 
   const getFolderSubdir = () => {
     switch (contentType) {
@@ -196,7 +203,7 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
   const hasCurseForgeKey = !!curseforgeApiKey.trim();
 
   return (
-    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0d121c]/90 border border-[#243144] rounded-2xl shadow-2xl overflow-hidden backdrop-blur-md">
+    <div className="relative z-10 flex flex-col h-full min-h-0 bg-[#0d121c] border border-[#243144] rounded-2xl shadow-2xl overflow-hidden">
       {/* Top Header: Content Types & View Switcher */}
       <div className="px-5 py-3 bg-[#131b29] border-b border-[#243144] flex items-center justify-between gap-4 flex-wrap">
         {/* Left: Content Type Pills (Mods | Resource Packs | Shaders) */}
@@ -615,4 +622,4 @@ export const ModsPanel: React.FC<ModsPanelProps> = ({
       </div>
     </div>
   );
-};
+});

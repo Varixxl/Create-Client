@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { ChevronDown, Check, Search, X } from "lucide-react";
 
 export interface DropdownOption {
@@ -19,7 +19,7 @@ interface CustomDropdownProps {
   className?: string;
 }
 
-export const CustomDropdown: React.FC<CustomDropdownProps> = ({
+export const CustomDropdown: React.FC<CustomDropdownProps> = React.memo(({
   value,
   options,
   onChange,
@@ -85,14 +85,16 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
 
   const selectedOption = options.find((opt) => opt.value === value);
 
-  const filteredOptions = searchable && search.trim()
-    ? options.filter((opt) =>
-        opt.label.toLowerCase().includes(search.toLowerCase()) ||
-        String(opt.value).toLowerCase().includes(search.toLowerCase()) ||
-        (opt.description && opt.description.toLowerCase().includes(search.toLowerCase())) ||
-        (opt.badge && opt.badge.toLowerCase().includes(search.toLowerCase()))
-      )
-    : options;
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !search.trim()) return options;
+    const lower = search.toLowerCase();
+    return options.filter((opt) =>
+      opt.label.toLowerCase().includes(lower) ||
+      String(opt.value).toLowerCase().includes(lower) ||
+      (opt.description && opt.description.toLowerCase().includes(lower)) ||
+      (opt.badge && opt.badge.toLowerCase().includes(lower))
+    );
+  }, [options, searchable, search]);
 
   return (
     <div ref={containerRef} className={`relative select-none ${className}`}>
@@ -222,4 +224,4 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
       )}
     </div>
   );
-};
+});

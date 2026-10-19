@@ -11,7 +11,7 @@ interface CreateServerModalProps {
   onError: (msg: string) => void;
 }
 
-export const CreateServerModal: React.FC<CreateServerModalProps> = ({
+export const CreateServerModal: React.FC<CreateServerModalProps> = React.memo(({
   isOpen,
   profile,
   onClose,
@@ -48,7 +48,7 @@ export const CreateServerModal: React.FC<CreateServerModalProps> = ({
       : profile.mc_version;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
       <div className="w-full max-w-lg bg-[#0e131d] border border-[#2a384c] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="px-6 py-4 bg-[#141c2b] border-b border-[#243144] flex items-center justify-between">
@@ -159,4 +159,4 @@ export const CreateServerModal: React.FC<CreateServerModalProps> = ({
       </div>
     </div>
   );
-};
+});
